@@ -167,9 +167,9 @@ class RestClient:
         if not bids or not asks:
             return None
 
-        # Polymarket CLOB: bids descending → [0] = best bid; asks ascending → [0] = best ask
-        best_bid = float(bids[0]["price"])
-        best_ask = float(asks[0]["price"])
+        # Polymarket CLOB: bids ascending → [-1] = best bid; asks descending → [-1] = best ask
+        best_bid = float(bids[-1]["price"])
+        best_ask = float(asks[-1]["price"])
 
         # Фільтр: якщо spread > 90% — це не реальний ринок
         if best_ask - best_bid > 0.90:
