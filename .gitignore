@@ -1,0 +1,12 @@
+config/settings.yaml
+config/secrets.env
+logs/
+*.log
+__pycache__/
+*.pyc
+venv/
+.env
+phase0_results.csv
+*.egg-info/
+.vscode/
+.idea/

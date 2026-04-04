@@ -1,0 +1,962 @@
+{
+  "verdict_distribution": {
+    "GO": {
+      "count": 9,
+      "pct": 8.11
+    },
+    "MARGINAL": {
+      "count": 5,
+      "pct": 4.5
+    },
+    "NO_GO": {
+      "count": 52,
+      "pct": 46.85
+    },
+    "NO_DATA": {
+      "count": 45,
+      "pct": 40.54
+    },
+    "total": 111
+  },
+  "cost_structure": {
+    "taker_rt_cost_avg": 5.680795,
+    "taker_rt_cost_min": 2.6557,
+    "taker_rt_cost_max": 17.3846,
+    "spread_pct_avg": 3.680795,
+    "spread_pct_min": 0.6557,
+    "spread_pct_max": 15.3846,
+    "maker_rt_cost_avg": 5.333692,
+    "maker_rt_cost_min": 0.796,
+    "maker_rt_cost_max": 22.8894
+  },
+  "move_stats": {
+    "move_1h_avg": 0.0,
+    "move_1h_median": 0.0,
+    "move_1h_p75": 0.0,
+    "move_1h_p90": 0.0,
+    "move_6h_avg": 0.0,
+    "move_6h_median": 0.0,
+    "move_6h_p75": 0.0,
+    "move_6h_p90": 0.0,
+    "move_24h_avg": 0.020417,
+    "move_24h_median": 0.0,
+    "move_24h_p75": 0.02,
+    "move_24h_p90": 0.0475,
+    "move_48h_avg": 0.020417,
+    "move_48h_median": 0.0,
+    "move_48h_p75": 0.02,
+    "move_48h_p90": 0.0475,
+    "move_72h_avg": 0.027235,
+    "move_72h_median": 0.005,
+    "move_72h_p75": 0.02875,
+    "move_72h_p90": 0.08
+  },
+  "ratio_stats": {
+    "ratio_mean": 1.889091,
+    "ratio_median": 0.0,
+    "pct_gt_2": 13.64,
+    "pct_gt_1_5": 21.21
+  },
+  "ratio_stats_clean_go": {
+    "ratio_mean": 2.93,
+    "ratio_median": 2.86,
+    "pct_gt_2": 100.0,
+    "pct_gt_1_5": 100.0
+  },
+  "flag_summary": {
+    "total_go": 9,
+    "clean_go": 4,
+    "clean_go_pct_of_go": 44.44,
+    "clean_go_pct_of_data_markets": 6.06,
+    "flags": {
+      "LOW_VOL": {
+        "count": 4,
+        "pct_of_go": 44.44
+      },
+      "EXTREME_ODDS": {
+        "count": 1,
+        "pct_of_go": 11.11
+      },
+      "THIN_DEPTH": {
+        "count": 0,
+        "pct_of_go": 0.0
+      },
+      "MOVE_EXCEEDS_HALF_PRICE": {
+        "count": 3,
+        "pct_of_go": 33.33
+      },
+      "RATIO_OUTLIER": {
+        "count": 1,
+        "pct_of_go": 11.11
+      }
+    }
+  },
+  "recommendation": {
+    "recommendation": "STOP",
+    "stop_reason": "clean_go_pct (6.1%) < 15% threshold",
+    "clean_go_pct_of_data_markets": 6.06,
+    "note": "Proceed if ratio_24h > 1.5 on clean GO subset; Stop if clean_go_pct < 15% of all markets with data."
+  },
+  "artifacts_ratio_gt20": [
+    {
+      "market_id": 1520678,
+      "slug": "elc-sot-ips-2026-04-03-ips",
+      "sport": "football",
+      "league": "unknown",
+      "verdict": "GO",
+      "ratio_24h": 68.52,
+      "volume_24h": 5815.005145000001,
+      "mid_price": 0.1525
+    }
+  ],
+  "segments": {
+    "by_sport": {
+      "baseball": {
+        "count": 18,
+        "go_count": 0,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 0.766667,
+          "ratio_median": 0.33,
+          "pct_gt_2": 0.0,
+          "pct_gt_1_5": 33.33
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 4.447067,
+            "taker_rt_cost_min": 3.5504,
+            "taker_rt_cost_max": 5.9216
+          },
+          "spread_pct": {
+            "spread_pct_avg": 2.447067,
+            "spread_pct_min": 1.5504,
+            "spread_pct_max": 3.9216
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 3.4831,
+            "maker_rt_cost_min": 2.1381,
+            "maker_rt_cost_max": 5.6949
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.018333,
+            "move_24h_median": 0.01,
+            "move_24h_p75": 0.0275,
+            "move_24h_p90": 0.038
+          },
+          "move_48h": {
+            "move_48h_avg": 0.018333,
+            "move_48h_median": 0.01,
+            "move_48h_p75": 0.0275,
+            "move_48h_p90": 0.038
+          },
+          "move_72h": {
+            "move_72h_avg": 0.11,
+            "move_72h_median": 0.1,
+            "move_72h_p75": 0.1275,
+            "move_72h_p90": 0.144
+          }
+        }
+      },
+      "basketball": {
+        "count": 31,
+        "go_count": 3,
+        "clean_go_count": 2,
+        "ratio": {
+          "ratio_mean": 2.12125,
+          "ratio_median": 1.38,
+          "pct_gt_2": 37.5,
+          "pct_gt_1_5": 37.5
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 6.287088,
+            "taker_rt_cost_min": 3.0811,
+            "taker_rt_cost_max": 15.3333
+          },
+          "spread_pct": {
+            "spread_pct_avg": 4.287088,
+            "spread_pct_min": 1.0811,
+            "spread_pct_max": 13.3333
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 6.243138,
+            "maker_rt_cost_min": 1.4341,
+            "maker_rt_cost_max": 19.8124
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.03875,
+            "move_24h_median": 0.035,
+            "move_24h_p75": 0.06,
+            "move_24h_p90": 0.066
+          },
+          "move_48h": {
+            "move_48h_avg": 0.03875,
+            "move_48h_median": 0.035,
+            "move_48h_p75": 0.06,
+            "move_48h_p90": 0.066
+          },
+          "move_72h": {
+            "move_72h_avg": 0.049375,
+            "move_72h_median": 0.0375,
+            "move_72h_p75": 0.09,
+            "move_72h_p90": 0.105
+          }
+        }
+      },
+      "football": {
+        "count": 51,
+        "go_count": 5,
+        "clean_go_count": 2,
+        "ratio": {
+          "ratio_mean": 1.8704,
+          "ratio_median": 0.0,
+          "pct_gt_2": 10.0,
+          "pct_gt_1_5": 18.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 5.796466,
+            "taker_rt_cost_min": 2.6557,
+            "taker_rt_cost_max": 17.3846
+          },
+          "spread_pct": {
+            "spread_pct_avg": 3.796466,
+            "spread_pct_min": 0.6557,
+            "spread_pct_max": 15.3846
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 5.507198,
+            "maker_rt_cost_min": 0.796,
+            "maker_rt_cost_max": 22.8894
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.01525,
+            "move_24h_median": 0.0,
+            "move_24h_p75": 0.015,
+            "move_24h_p90": 0.04
+          },
+          "move_48h": {
+            "move_48h_avg": 0.01525,
+            "move_48h_median": 0.0,
+            "move_48h_p75": 0.015,
+            "move_48h_p90": 0.04
+          },
+          "move_72h": {
+            "move_72h_avg": 0.01665,
+            "move_72h_median": 0.0,
+            "move_72h_p75": 0.02,
+            "move_72h_p90": 0.041
+          }
+        }
+      },
+      "hockey": {
+        "count": 4,
+        "go_count": 0,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 0.0675,
+          "ratio_median": 0.0,
+          "pct_gt_2": 0.0,
+          "pct_gt_1_5": 0.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 4.2796,
+            "taker_rt_cost_min": 3.8692,
+            "taker_rt_cost_max": 4.5974
+          },
+          "spread_pct": {
+            "spread_pct_avg": 2.2796,
+            "spread_pct_min": 1.8692,
+            "spread_pct_max": 2.5974
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 3.2319,
+            "maker_rt_cost_min": 2.6163,
+            "maker_rt_cost_max": 3.7086
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.00125,
+            "move_24h_median": 0.0,
+            "move_24h_p75": 0.00125,
+            "move_24h_p90": 0.0035
+          },
+          "move_48h": {
+            "move_48h_avg": 0.00125,
+            "move_48h_median": 0.0,
+            "move_48h_p75": 0.00125,
+            "move_48h_p90": 0.0035
+          },
+          "move_72h": {
+            "move_72h_avg": 0.00625,
+            "move_72h_median": 0.005,
+            "move_72h_p75": 0.01125,
+            "move_72h_p90": 0.0135
+          }
+        }
+      },
+      "tennis": {
+        "count": 7,
+        "go_count": 1,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 11.62,
+          "ratio_median": 11.62,
+          "pct_gt_2": 100.0,
+          "pct_gt_1_5": 100.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 4.3529,
+            "taker_rt_cost_min": 4.3529,
+            "taker_rt_cost_max": 4.3529
+          },
+          "spread_pct": {
+            "spread_pct_avg": 2.3529,
+            "spread_pct_min": 2.3529,
+            "spread_pct_max": 2.3529
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 3.3418,
+            "maker_rt_cost_min": 3.3418,
+            "maker_rt_cost_max": 3.3418
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.215,
+            "move_24h_median": 0.215,
+            "move_24h_p75": 0.215,
+            "move_24h_p90": 0.215
+          },
+          "move_48h": {
+            "move_48h_avg": 0.215,
+            "move_48h_median": 0.215,
+            "move_48h_p75": 0.215,
+            "move_48h_p90": 0.215
+          },
+          "move_72h": {
+            "move_72h_avg": 0.215,
+            "move_72h_median": 0.215,
+            "move_72h_p75": 0.215,
+            "move_72h_p90": 0.215
+          }
+        }
+      }
+    },
+    "by_verdict": {
+      "GO": {
+        "count": 9,
+        "go_count": 9,
+        "clean_go_count": 4,
+        "ratio": {
+          "ratio_mean": 11.323333,
+          "ratio_median": 3.17,
+          "pct_gt_2": 100.0,
+          "pct_gt_1_5": 100.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 5.095322,
+            "taker_rt_cost_min": 2.6557,
+            "taker_rt_cost_max": 12.5263
+          },
+          "spread_pct": {
+            "spread_pct_avg": 3.095322,
+            "spread_pct_min": 0.6557,
+            "spread_pct_max": 10.5263
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 4.455478,
+            "maker_rt_cost_min": 0.796,
+            "maker_rt_cost_max": 15.602
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.098611,
+            "move_24h_median": 0.06,
+            "move_24h_p75": 0.08,
+            "move_24h_p90": 0.2275
+          },
+          "move_48h": {
+            "move_48h_avg": 0.098611,
+            "move_48h_median": 0.06,
+            "move_48h_p75": 0.08,
+            "move_48h_p90": 0.2275
+          },
+          "move_72h": {
+            "move_72h_avg": 0.093611,
+            "move_72h_median": 0.05,
+            "move_72h_p75": 0.085,
+            "move_72h_p90": 0.2365
+          }
+        }
+      },
+      "MARGINAL": {
+        "count": 5,
+        "go_count": 0,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 1.732,
+          "ratio_median": 1.64,
+          "pct_gt_2": 0.0,
+          "pct_gt_1_5": 100.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 4.74518,
+            "taker_rt_cost_min": 3.5504,
+            "taker_rt_cost_max": 8.8966
+          },
+          "spread_pct": {
+            "spread_pct_avg": 2.74518,
+            "spread_pct_min": 1.5504,
+            "spread_pct_max": 6.8966
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 3.93028,
+            "maker_rt_cost_min": 2.1381,
+            "maker_rt_cost_max": 10.1574
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.035,
+            "move_24h_median": 0.035,
+            "move_24h_p75": 0.04,
+            "move_24h_p90": 0.043
+          },
+          "move_48h": {
+            "move_48h_avg": 0.035,
+            "move_48h_median": 0.035,
+            "move_48h_p75": 0.04,
+            "move_48h_p90": 0.043
+          },
+          "move_72h": {
+            "move_72h_avg": 0.04,
+            "move_72h_median": 0.04,
+            "move_72h_p75": 0.05,
+            "move_72h_p90": 0.065
+          }
+        }
+      },
+      "NO_DATA": {
+        "count": 45,
+        "go_count": 0,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": null,
+          "ratio_median": null,
+          "pct_gt_2": null,
+          "pct_gt_1_5": null
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": null,
+            "taker_rt_cost_min": null,
+            "taker_rt_cost_max": null
+          },
+          "spread_pct": {
+            "spread_pct_avg": null,
+            "spread_pct_min": null,
+            "spread_pct_max": null
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": null,
+            "maker_rt_cost_min": null,
+            "maker_rt_cost_max": null
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": null,
+            "move_1h_median": null,
+            "move_1h_p75": null,
+            "move_1h_p90": null
+          },
+          "move_6h": {
+            "move_6h_avg": null,
+            "move_6h_median": null,
+            "move_6h_p75": null,
+            "move_6h_p90": null
+          },
+          "move_24h": {
+            "move_24h_avg": null,
+            "move_24h_median": null,
+            "move_24h_p75": null,
+            "move_24h_p90": null
+          },
+          "move_48h": {
+            "move_48h_avg": null,
+            "move_48h_median": null,
+            "move_48h_p75": null,
+            "move_48h_p90": null
+          },
+          "move_72h": {
+            "move_72h_avg": null,
+            "move_72h_median": null,
+            "move_72h_p75": null,
+            "move_72h_p90": null
+          }
+        }
+      },
+      "NO_GO": {
+        "count": 52,
+        "go_count": 0,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 0.271346,
+          "ratio_median": 0.0,
+          "pct_gt_2": 0.0,
+          "pct_gt_1_5": 0.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 5.87209,
+            "taker_rt_cost_min": 3.0811,
+            "taker_rt_cost_max": 17.3846
+          },
+          "spread_pct": {
+            "spread_pct_avg": 3.87209,
+            "spread_pct_min": 1.0811,
+            "spread_pct_max": 15.3846
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 5.620635,
+            "maker_rt_cost_min": 1.4341,
+            "maker_rt_cost_max": 22.8894
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.005481,
+            "move_24h_median": 0.0,
+            "move_24h_p75": 0.01,
+            "move_24h_p90": 0.0195
+          },
+          "move_48h": {
+            "move_48h_avg": 0.005481,
+            "move_48h_median": 0.0,
+            "move_48h_p75": 0.01,
+            "move_48h_p90": 0.0195
+          },
+          "move_72h": {
+            "move_72h_avg": 0.014519,
+            "move_72h_median": 0.0,
+            "move_72h_p75": 0.01125,
+            "move_72h_p90": 0.0345
+          }
+        }
+      }
+    },
+    "by_vol_tier": {
+      "10K-50K": {
+        "count": 47,
+        "go_count": 3,
+        "clean_go_count": 3,
+        "ratio": {
+          "ratio_mean": 0.759667,
+          "ratio_median": 0.165,
+          "pct_gt_2": 10.0,
+          "pct_gt_1_5": 23.33
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 5.734497,
+            "taker_rt_cost_min": 3.1173,
+            "taker_rt_cost_max": 17.3846
+          },
+          "spread_pct": {
+            "spread_pct_avg": 3.734497,
+            "spread_pct_min": 1.1173,
+            "spread_pct_max": 15.3846
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 5.414243,
+            "maker_rt_cost_min": 1.4884,
+            "maker_rt_cost_max": 22.8894
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.015833,
+            "move_24h_median": 0.005,
+            "move_24h_p75": 0.0275,
+            "move_24h_p90": 0.045
+          },
+          "move_48h": {
+            "move_48h_avg": 0.015833,
+            "move_48h_median": 0.005,
+            "move_48h_p75": 0.0275,
+            "move_48h_p90": 0.045
+          },
+          "move_72h": {
+            "move_72h_avg": 0.024667,
+            "move_72h_median": 0.005,
+            "move_72h_p75": 0.03375,
+            "move_72h_p90": 0.0775
+          }
+        }
+      },
+      "<10K": {
+        "count": 44,
+        "go_count": 4,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 4.215714,
+          "ratio_median": 0.0,
+          "pct_gt_2": 19.05,
+          "pct_gt_1_5": 19.05
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 6.481548,
+            "taker_rt_cost_min": 2.6557,
+            "taker_rt_cost_max": 17.3846
+          },
+          "spread_pct": {
+            "spread_pct_avg": 4.481548,
+            "spread_pct_min": 0.6557,
+            "spread_pct_max": 15.3846
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 6.534824,
+            "maker_rt_cost_min": 0.796,
+            "maker_rt_cost_max": 22.8894
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.030119,
+            "move_24h_median": 0.0,
+            "move_24h_p75": 0.015,
+            "move_24h_p90": 0.05
+          },
+          "move_48h": {
+            "move_48h_avg": 0.030119,
+            "move_48h_median": 0.0,
+            "move_48h_p75": 0.015,
+            "move_48h_p90": 0.05
+          },
+          "move_72h": {
+            "move_72h_avg": 0.033214,
+            "move_72h_median": 0.005,
+            "move_72h_p75": 0.02,
+            "move_72h_p90": 0.05
+          }
+        }
+      },
+      ">50K": {
+        "count": 20,
+        "go_count": 2,
+        "clean_go_count": 1,
+        "ratio": {
+          "ratio_mean": 0.890667,
+          "ratio_median": 0.27,
+          "pct_gt_2": 13.33,
+          "pct_gt_1_5": 20.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 4.45234,
+            "taker_rt_cost_min": 3.0811,
+            "taker_rt_cost_max": 12.5263
+          },
+          "spread_pct": {
+            "spread_pct_avg": 2.45234,
+            "spread_pct_min": 1.0811,
+            "spread_pct_max": 10.5263
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 3.491007,
+            "maker_rt_cost_min": 1.4341,
+            "maker_rt_cost_max": 15.602
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.016,
+            "move_24h_median": 0.005,
+            "move_24h_p75": 0.0275,
+            "move_24h_p90": 0.052
+          },
+          "move_48h": {
+            "move_48h_avg": 0.016,
+            "move_48h_median": 0.005,
+            "move_48h_p75": 0.0275,
+            "move_48h_p90": 0.052
+          },
+          "move_72h": {
+            "move_72h_avg": 0.024,
+            "move_72h_median": 0.01,
+            "move_72h_p75": 0.035,
+            "move_72h_p90": 0.073
+          }
+        }
+      }
+    },
+    "by_price_regime": {
+      "extreme": {
+        "count": 14,
+        "go_count": 1,
+        "clean_go_count": 0,
+        "ratio": {
+          "ratio_mean": 1.37,
+          "ratio_median": 1.27,
+          "pct_gt_2": 10.0,
+          "pct_gt_1_5": 20.0
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 11.93481,
+            "taker_rt_cost_min": 3.0811,
+            "taker_rt_cost_max": 17.3846
+          },
+          "spread_pct": {
+            "spread_pct_avg": 9.93481,
+            "spread_pct_min": 1.0811,
+            "spread_pct_max": 15.3846
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 14.71471,
+            "maker_rt_cost_min": 1.4341,
+            "maker_rt_cost_max": 22.8894
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.021,
+            "move_24h_median": 0.015,
+            "move_24h_p75": 0.035,
+            "move_24h_p90": 0.042
+          },
+          "move_48h": {
+            "move_48h_avg": 0.021,
+            "move_48h_median": 0.015,
+            "move_48h_p75": 0.035,
+            "move_48h_p90": 0.042
+          },
+          "move_72h": {
+            "move_72h_avg": 0.017,
+            "move_72h_median": 0.01,
+            "move_72h_p75": 0.02,
+            "move_72h_p90": 0.037
+          }
+        }
+      },
+      "mid-range": {
+        "count": 97,
+        "go_count": 8,
+        "clean_go_count": 4,
+        "ratio": {
+          "ratio_mean": 1.981786,
+          "ratio_median": 0.0,
+          "pct_gt_2": 14.29,
+          "pct_gt_1_5": 21.43
+        },
+        "cost": {
+          "taker_rt_cost": {
+            "taker_rt_cost_avg": 4.564007,
+            "taker_rt_cost_min": 2.6557,
+            "taker_rt_cost_max": 9.4713
+          },
+          "spread_pct": {
+            "spread_pct_avg": 2.564007,
+            "spread_pct_min": 0.6557,
+            "spread_pct_max": 7.4713
+          },
+          "maker_rt_cost": {
+            "maker_rt_cost_avg": 3.658511,
+            "maker_rt_cost_min": 0.796,
+            "maker_rt_cost_max": 11.0195
+          }
+        },
+        "moves": {
+          "move_1h": {
+            "move_1h_avg": 0.0,
+            "move_1h_median": 0.0,
+            "move_1h_p75": 0.0,
+            "move_1h_p90": 0.0
+          },
+          "move_6h": {
+            "move_6h_avg": 0.0,
+            "move_6h_median": 0.0,
+            "move_6h_p75": 0.0,
+            "move_6h_p90": 0.0
+          },
+          "move_24h": {
+            "move_24h_avg": 0.020313,
+            "move_24h_median": 0.0,
+            "move_24h_p75": 0.02,
+            "move_24h_p90": 0.0475
+          },
+          "move_48h": {
+            "move_48h_avg": 0.020313,
+            "move_48h_median": 0.0,
+            "move_48h_p75": 0.02,
+            "move_48h_p90": 0.0475
+          },
+          "move_72h": {
+            "move_72h_avg": 0.029062,
+            "move_72h_median": 0.0,
+            "move_72h_p75": 0.0325,
+            "move_72h_p90": 0.0925
+          }
+        }
+      }
+    }
+  }
+}
