@@ -22,6 +22,7 @@ from collector.market_discovery import MarketDiscovery
 from collector.normalizer import normalize_snapshot, compute_time_to_event
 from db.repository import Repository
 from alerts.logger_alert import LoggerAlert
+from config.validate import validate_config
 
 
 # Logging
@@ -229,6 +230,7 @@ async def main():
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
+    validate_config(config)
     collector = Collector(config)
 
     # Graceful shutdown

@@ -146,6 +146,7 @@ class RestClient:
                     "token_id_no": token_no,
                     "status": "active",
                     "volume_24h": float(market.get("volume24hr", 0) or 0),
+                    "enable_order_book": bool(market.get("enableOrderBook", False)),
                 }
             )
         return markets
@@ -166,9 +167,9 @@ class RestClient:
         if not bids or not asks:
             return None
 
-        # Polymarket sorts bids ascending and asks descending — best prices are at the end
-        best_bid = float(bids[-1]["price"])
-        best_ask = float(asks[-1]["price"])
+        # Polymarket CLOB: bids descending → [0] = best bid; asks ascending → [0] = best ask
+        best_bid = float(bids[0]["price"])
+        best_ask = float(asks[0]["price"])
 
         # Фільтр: якщо spread > 90% — це не реальний ринок
         if best_ask - best_bid > 0.90:
@@ -179,8 +180,9 @@ class RestClient:
         if mid < 0.03 or mid > 0.97:
             return None
 
-        bid_depth = sum(float(b["price"]) * float(b["size"]) for b in bids)
-        ask_depth = sum(float(a["price"]) * float(a["size"]) for a in asks)
+        # Depth = $ notional (size), не price*size для бінарних контрактів
+        bid_depth = sum(float(b["size"]) for b in bids)
+        ask_depth = sum(float(a["size"]) for a in asks)
 
         spread = best_ask - best_bid
 
@@ -224,14 +226,14 @@ class RestClient:
     # --- CLOB API: price history ---
 
     async def get_price_history(
-        self, token_id: str, interval: str = "max", fidelity: int = 3600
+        self, token_id: str, interval: str = "max", fidelity: int = 60
     ) -> Optional[list]:
         """
         Отримати історію цін.
         interval: 1h, 6h, 1d, 1w, 1m, max
-        fidelity: секунди між точками (3600 = 1 год)
+        fidelity: секунди між точками (60 = 1 хв — краще для нових ринків)
         """
-        # Спробувати основний endpoint (правильний параметр: market, не token_id)
+        # Основний endpoint: market=token_id, fidelity=60
         data = await self._get(
             f"{self.clob_url}/prices-history",
             params={
@@ -243,29 +245,13 @@ class RestClient:
         if data and "history" in data and len(data["history"]) > 0:
             return data["history"]
 
-        # Fallback: спробувати через /price-history (без s)
+        # Fallback: менший interval якщо max пустий (новий ринок)
         data = await self._get(
-            f"{self.clob_url}/price-history",
-            params={
-                "market": token_id,
-                "interval": interval,
-                "fidelity": fidelity,
-            },
+            f"{self.clob_url}/prices-history",
+            params={"market": token_id, "interval": "1w", "fidelity": 60},
         )
         if data and "history" in data and len(data["history"]) > 0:
             return data["history"]
-
-        # Fallback 2: midpoints endpoint
-        data = await self._get(
-            f"{self.clob_url}/midpoints",
-            params={
-                "token_id": token_id,
-                "interval": interval,
-                "fidelity": fidelity,
-            },
-        )
-        if data and isinstance(data, list) and len(data) > 0:
-            return data
 
         logger.debug(f"No price history for token {token_id[:16]}...")
         return None

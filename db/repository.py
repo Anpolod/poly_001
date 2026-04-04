@@ -1,8 +1,7 @@
 """Repository — всі запити до бази даних"""
 
 import asyncpg
-import yaml
-from pathlib import Path
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -14,12 +13,13 @@ class Repository:
     @classmethod
     async def create(cls, config: dict) -> "Repository":
         db = config["database"]
+        password = os.environ.get("DB_PASSWORD") or db["password"]
         pool = await asyncpg.create_pool(
-            host=db["host"],
-            port=db["port"],
-            database=db["name"],
-            user=db["user"],
-            password=db["password"],
+            host=os.environ.get("DB_HOST") or db["host"],
+            port=int(os.environ.get("DB_PORT") or db["port"]),
+            database=os.environ.get("DB_NAME") or db["name"],
+            user=os.environ.get("DB_USER") or db["user"],
+            password=password,
             min_size=2,
             max_size=10,
         )

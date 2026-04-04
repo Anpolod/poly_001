@@ -20,6 +20,7 @@ from collector.market_discovery import MarketDiscovery
 from analytics.cost_analyzer import analyze_market, aggregate_by_league
 from db.repository import Repository
 from alerts.logger_alert import LoggerAlert
+from config.validate import validate_config
 
 
 # Logging
@@ -44,6 +45,8 @@ async def run_phase0():
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
+
+    validate_config(config)
 
     # Init
     rest = RestClient(config)
@@ -71,7 +74,10 @@ async def run_phase0():
         # 3. Зберегти ринки в БД
         logger.info("Крок 2: Збереження ринків в БД...")
         for m in markets:
-            await repo.upsert_market(m)
+            try:
+                await repo.upsert_market(m)
+            except Exception as e:
+                logger.error(f"upsert_market failed for {m.get('slug')}: {e}")
 
         # 4. Зібрати orderbook + fees + history по кожному ринку
         logger.info(f"Крок 3: Збір orderbook для {len(markets)} ринків...")
@@ -111,7 +117,10 @@ async def run_phase0():
             results.append(result)
 
             # Зберегти в БД
-            await repo.insert_cost_analysis(result)
+            try:
+                await repo.insert_cost_analysis(result)
+            except Exception as e:
+                logger.error(f"insert_cost_analysis failed for {market.get('slug')}: {e}")
 
         if not results:
             logger.error("Жоден ринок не проаналізовано")

@@ -238,12 +238,13 @@ class MarketDiscovery:
         Returns:
             List of MarketInfo dataclasses with verdict="TRADEABLE".
         """
-        MIN_VOLUME = 10_000.0
-        MAX_SPREAD = 0.03
-        MIN_DEPTH = 1_000.0
-        MID_EXTREME_LOW = 0.15
-        MID_EXTREME_HIGH = 0.85
-        MID_FAVORITE = 0.80
+        ft = self.config.get("filter_tradeable", {})
+        MIN_VOLUME      = float(ft.get("min_volume_24h",   self.config["phase1"]["min_volume_24h"]))
+        MAX_SPREAD      = float(ft.get("max_spread",       self.config["phase1"]["max_spread"]))
+        MIN_DEPTH       = float(ft.get("min_depth",        self.config["phase1"]["min_depth"]))
+        MID_EXTREME_LOW = float(ft.get("mid_extreme_low",  0.15))
+        MID_EXTREME_HIGH= float(ft.get("mid_extreme_high", 0.85))
+        MID_FAVORITE    = float(ft.get("mid_favorite",     0.80))
 
         now = datetime.now(timezone.utc)
         result: list[MarketInfo] = []

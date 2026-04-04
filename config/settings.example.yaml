@@ -2,11 +2,11 @@
 # Скопіюй цей файл як settings.yaml і заповни свої параметри
 
 database:
-  host: localhost
-  port: 5432
-  name: polymarket_sports
-  user: postgres
-  password: ""  # ← вкажи свій пароль
+  host: localhost      # override: DB_HOST env var
+  port: 5432           # override: DB_PORT env var
+  name: polymarket_sports  # override: DB_NAME env var
+  user: postgres       # override: DB_USER env var
+  password: ""         # override: DB_PASSWORD env var (recommended for production)
 
 api:
   gamma_base_url: "https://gamma-api.polymarket.com"
@@ -29,6 +29,16 @@ phase1:
   min_volume_24h: 10000         # $ мінімум для підписки
   max_spread: 0.03              # 3¢ максимум
   min_depth: 1000               # $ мінімум глибини стакану
+
+# Optional overrides for filter_tradeable() thresholds.
+# If omitted, falls back to phase1 values (min_volume_24h, max_spread, min_depth).
+filter_tradeable:
+  min_volume_24h:  10000   # $ min 24h volume
+  max_spread:      0.03    # max bid-ask spread
+  min_depth:       1000    # $ min side depth
+  mid_extreme_low: 0.15    # exclude markets trading below this price
+  mid_extreme_high: 0.85   # exclude markets trading above this price
+  mid_favorite:    0.80    # exclude strong favorites above this price
 
 collector:
   ws_reconnect_base_delay: 5
