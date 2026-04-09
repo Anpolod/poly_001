@@ -188,7 +188,6 @@ def _render_chart(rows: list[dict], market: dict, limit: int) -> str:
     lines.append(header)
     lines.append(sep)
 
-    first_ts = rows[0]["ts"]  # always relative to very first snapshot
     for row in display:
         elapsed_m = int(row["minutes_elapsed"])
         hh, mm    = divmod(elapsed_m, 60)
@@ -247,8 +246,8 @@ def _render_summary(rows: list[dict], avg_speed: float, spike_thr: float) -> str
     lines.append(f"  Total move:            {total_move:>+7.2f}¢")
 
     if total_abs > 0:
-        lines.append(f"  Via spike:             {spike_move:>7.2f}¢  ({spike_move / total_abs * 100:>4.0f}%)  ← news / untradeable")
-        lines.append(f"  Via drift:             {drift_move:>7.2f}¢  ({drift_move / total_abs * 100:>4.0f}%)  ← potentially tradeable")
+        lines.append(f"  Via spike:             {spike_move:>7.2f}¢  ({spike_move / total_abs * 100:>4.0f}%)  ← news / untradeable")  # noqa: E501
+        lines.append(f"  Via drift:             {drift_move:>7.2f}¢  ({drift_move / total_abs * 100:>4.0f}%)  ← potentially tradeable")  # noqa: E501
     else:
         lines.append("  Via spike:               0.00¢  (  0%)")
         lines.append("  Via drift:               0.00¢  (  0%)")

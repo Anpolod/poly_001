@@ -10,3 +10,30 @@ phase0_results.csv
 *.egg-info/
 .vscode/
 .idea/
+
+# macOS metadata
+.DS_Store
+._*
+
+# Caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# Local data dumps
+*.csv
+*.sql
+polymarket-inspect.json
+phase0_analysis.json
+phase0_report.md
+phase0_fixes_report.md
+
+# Obsidian vault (local notes)
+Polymarket/
+obsidian/
+.obsidian/
+
+# Local notes
+Untitled.md
+Analysis.md
+PROJECT_STATE.md

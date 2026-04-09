@@ -20,7 +20,7 @@ Parameters (all tuneable from config):
   min_spike_steps  — consecutive same-direction steps to declare a spike (default 3)
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 

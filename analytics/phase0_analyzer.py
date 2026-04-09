@@ -27,7 +27,6 @@ csv_path defaults to phase0_results.csv (relative to cwd or project root).
 from __future__ import annotations
 
 import json
-import os
 import sys
 import warnings
 from pathlib import Path
@@ -184,7 +183,7 @@ def apply_flags(df: pd.DataFrame) -> pd.DataFrame:
 def verdict_distribution(df: pd.DataFrame) -> dict:
     total = len(df)
     verdicts = ["GO", "MARGINAL", "NO_GO", "NO_DATA"]
-    dist = {}
+    dist: dict[str, Any] = {}
     for v in verdicts:
         n = int((df["verdict"] == v).sum())
         dist[v] = {"count": n, "pct": _pct(n, total)}
@@ -260,7 +259,6 @@ def artifact_markets(df: pd.DataFrame) -> list[dict]:
 def recommendation(flag_s: dict, ratio_s: dict) -> dict:
     """Derive proceed/stop recommendation."""
     clean_go_pct = flag_s["clean_go_pct_of_data_markets"]
-    ratio_clean = ratio_s.get("ratio_median")  # will refine below
     stop_reason = None
     proceed = True
 
@@ -324,7 +322,6 @@ def run_analysis(df: pd.DataFrame) -> dict:
 # ---------------------------------------------------------------------------
 
 def print_summary(analysis: dict) -> None:
-    df: pd.DataFrame = analysis["_df"]
     vd = analysis["verdict_distribution"]
     fs = analysis["flag_summary"]
     rec = analysis["recommendation"]
@@ -535,15 +532,15 @@ def export_markdown(analysis: dict, out_path: Path) -> None:
         "",
         "| Subset | Mean | Median | % > 2.0 | % > 1.5 |",
         "|--------|------|--------|---------|---------|",
-        f"| All data markets | {rs.get('ratio_mean')} | {rs.get('ratio_median')} | {rs.get('pct_gt_2')}% | {rs.get('pct_gt_1_5')}% |",
-        f"| Clean GO only | {rsc.get('ratio_mean')} | {rsc.get('ratio_median')} | {rsc.get('pct_gt_2')}% | {rsc.get('pct_gt_1_5')}% |",
+        f"| All data markets | {rs.get('ratio_mean')} | {rs.get('ratio_median')} | {rs.get('pct_gt_2')}% | {rs.get('pct_gt_1_5')}% |",  # noqa: E501
+        f"| Clean GO only | {rsc.get('ratio_mean')} | {rsc.get('ratio_median')} | {rsc.get('pct_gt_2')}% | {rsc.get('pct_gt_1_5')}% |",  # noqa: E501
         "",
         "---",
         "",
         "## GO Flag Summary",
         "",
         f"Total GO markets: **{fs['total_go']}**  ",
-        f"Clean GO (zero flags): **{fs['clean_go']}** ({fs['clean_go_pct_of_go']}% of GO, {fs['clean_go_pct_of_data_markets']}% of data markets)",
+        f"Clean GO (zero flags): **{fs['clean_go']}** ({fs['clean_go_pct_of_go']}% of GO, {fs['clean_go_pct_of_data_markets']}% of data markets)",  # noqa: E501
         "",
         "| Flag | Count | % of GO |",
         "|------|-------|---------|",

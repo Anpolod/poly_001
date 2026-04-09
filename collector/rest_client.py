@@ -1,16 +1,19 @@
-"""REST клієнт для Polymarket CLOB і Gamma API"""
+"""REST client for the Polymarket CLOB and Gamma APIs."""
 
 import asyncio
 import json
-import aiohttp
 import logging
-from typing import Optional
 from datetime import datetime
+from typing import Any, Optional
+
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 
 class RestClient:
+    """Async HTTP client for the Polymarket Gamma API (events/markets) and CLOB API (orderbooks, fees, history)."""
+
     def __init__(self, config: dict):
         self.gamma_url = config["api"]["gamma_base_url"]
         self.clob_url = config["api"]["clob_base_url"]
@@ -18,15 +21,17 @@ class RestClient:
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def start(self):
+        """Open the underlying aiohttp session. Must be called before any requests."""
         timeout = aiohttp.ClientTimeout(total=30)
         self.session = aiohttp.ClientSession(timeout=timeout)
 
     async def close(self):
+        """Close the aiohttp session and release connections."""
         if self.session:
             await self.session.close()
 
-    async def _get(self, url: str, params: dict = None) -> Optional[dict | list]:
-        """GET запит з retry і rate limiting"""
+    async def _get(self, url: str, params: dict = None) -> Optional[Any]:
+        """GET request with retry and rate limiting."""
         for attempt in range(3):
             try:
                 await asyncio.sleep(self.delay)
@@ -40,15 +45,20 @@ class RestClient:
                     else:
                         logger.warning(f"HTTP {resp.status} for {url}")
                         return None
+            except RuntimeError as e:
+                if "Session is closed" in str(e):
+                    logger.info("HTTP session closed (shutting down)")
+                    return None
+                raise
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.warning(f"Request failed (attempt {attempt+1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))
         return None
 
-    # --- Gamma API: ринки ---
+    # --- Gamma API: markets ---
 
     async def get_sports_events(self, limit: int = 100, offset: int = 0) -> list:
-        """Отримати список спортивних подій"""
+        """Fetch all active sports events, paginating until exhausted."""
         events = []
         while True:
             data = await self._get(
@@ -67,18 +77,18 @@ class RestClient:
             if len(data) < limit:
                 break
             offset += limit
-        logger.info(f"Знайдено {len(events)} спортивних подій")
+        logger.info(f"Found {len(events)} sports events")
         return events
 
     def parse_event(self, event: dict) -> list[dict]:
-        """Розпарсити event в список ринків (markets)"""
+        """Parse an event dict into a list of market dicts."""
         markets = []
         for market in event.get("markets", []):
-            # Визначити sport і league з тегів
+            # Determine sport and league from tags
             sport = "unknown"
             league = "unknown"
             tags = [t.get("label", "").lower() for t in event.get("tags", [])]
-            # Також спробувати event-level поля
+            # Also try event-level fields
             event_sport = event.get("sport", "").lower()
             event_league = event.get("league", "").lower()
 
@@ -154,7 +164,7 @@ class RestClient:
     # --- CLOB API: orderbook ---
 
     async def get_orderbook(self, token_id: str) -> Optional[dict]:
-        """Отримати orderbook для token_id"""
+        """Fetch the orderbook for a given token_id, applying sanity filters."""
         data = await self._get(
             f"{self.clob_url}/book", params={"token_id": token_id}
         )
@@ -171,16 +181,16 @@ class RestClient:
         best_bid = float(bids[-1]["price"])
         best_ask = float(asks[-1]["price"])
 
-        # Фільтр: якщо spread > 90% — це не реальний ринок
+        # Filter: spread > 90% means this is not a real market
         if best_ask - best_bid > 0.90:
             return None
 
-        # Фільтр: якщо ціна на краю (< 3¢ або > 97¢) — ринок не торгується
+        # Filter: price at extreme (<3¢ or >97¢) means market is effectively settled
         mid = (best_bid + best_ask) / 2
         if mid < 0.03 or mid > 0.97:
             return None
 
-        # Depth = $ notional (size), не price*size для бінарних контрактів
+        # Depth = $ notional (size), not price*size for binary contracts
         bid_depth = sum(float(b["size"]) for b in bids)
         ask_depth = sum(float(a["size"]) for a in asks)
 
@@ -198,7 +208,7 @@ class RestClient:
         }
 
     async def get_all_outcomes_orderbooks(self, market: dict) -> list[dict]:
-        """Отримати orderbook для всіх outcomes ринку"""
+        """Fetch orderbooks for both YES and NO outcomes of a market."""
         results = []
         for token_id in [market.get("token_id_yes"), market.get("token_id_no")]:
             if not token_id:
@@ -212,13 +222,13 @@ class RestClient:
     # --- CLOB API: fee rate ---
 
     async def get_fee_rate(self, token_id: str) -> Optional[float]:
-        """Отримати поточну fee rate для token_id"""
+        """Fetch the current fee rate for a token_id."""
         data = await self._get(
             f"{self.clob_url}/fee-rate", params={"token_id": token_id}
         )
         if data and "fee_rate" in data:
             return float(data["fee_rate"])
-        # Деякі ринки повертають інший формат
+        # Some markets return a different response format
         if data and "rate" in data:
             return float(data["rate"])
         return None
@@ -229,11 +239,11 @@ class RestClient:
         self, token_id: str, interval: str = "max", fidelity: int = 60
     ) -> Optional[list]:
         """
-        Отримати історію цін.
+        Fetch price history for a token.
         interval: 1h, 6h, 1d, 1w, 1m, max
-        fidelity: секунди між точками (60 = 1 хв — краще для нових ринків)
+        fidelity: seconds between data points (60 = 1 min — better for newer markets)
         """
-        # Основний endpoint: market=token_id, fidelity=60
+        # Primary endpoint: market=token_id, fidelity=60
         data = await self._get(
             f"{self.clob_url}/prices-history",
             params={
@@ -245,7 +255,7 @@ class RestClient:
         if data and "history" in data and len(data["history"]) > 0:
             return data["history"]
 
-        # Fallback: менший interval якщо max пустий (новий ринок)
+        # Fallback: smaller interval if max is empty (new market)
         data = await self._get(
             f"{self.clob_url}/prices-history",
             params={"market": token_id, "interval": "1w", "fidelity": 60},
@@ -257,14 +267,14 @@ class RestClient:
         return None
 
     async def get_current_prices(self, token_id: str) -> Optional[dict]:
-        """Отримати поточну ціну через book endpoint — як мінімум mid price"""
+        """Fetch the current price via the book endpoint — at minimum mid price."""
         ob = await self.get_orderbook(token_id)
         if ob and ob.get("mid_price"):
             return {"mid_price": ob["mid_price"], "best_bid": ob["best_bid"], "best_ask": ob["best_ask"]}
         return None
 
     async def get_midpoint(self, token_id: str) -> Optional[float]:
-        """Отримати поточний midpoint"""
+        """Fetch the current midpoint price for a token."""
         data = await self._get(
             f"{self.clob_url}/midpoint", params={"token_id": token_id}
         )
@@ -273,7 +283,7 @@ class RestClient:
         return None
 
     async def get_last_trade_price(self, token_id: str) -> Optional[float]:
-        """Отримати ціну останнього трейду"""
+        """Fetch the price of the most recent trade for a token."""
         data = await self._get(
             f"{self.clob_url}/last-trade-price", params={"token_id": token_id}
         )

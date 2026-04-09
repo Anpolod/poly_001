@@ -1,12 +1,14 @@
-"""Repository — всі запити до бази даних"""
+"""Repository — all database queries."""
 
-import asyncpg
 import os
 from datetime import datetime
-from typing import Optional
+
+import asyncpg
 
 
 class Repository:
+    """Async database access layer — thin wrapper around an asyncpg connection pool."""
+
     def __init__(self, pool: asyncpg.Pool):
         self.pool = pool
 
@@ -26,11 +28,13 @@ class Repository:
         return cls(pool)
 
     async def close(self):
+        """Close the underlying asyncpg connection pool."""
         await self.pool.close()
 
     # --- Markets ---
 
     async def upsert_market(self, market: dict):
+        """Insert or update a market row; updates status, event_start, and fee rates on conflict."""
         await self.pool.execute(
             """
             INSERT INTO markets (id, slug, question, sport, league, event_start,
@@ -57,6 +61,7 @@ class Repository:
         )
 
     async def get_active_markets(self) -> list:
+        """Return all markets with status='active' and a future event_start, ordered by start time."""
         return await self.pool.fetch(
             """
             SELECT * FROM markets
@@ -66,15 +71,17 @@ class Repository:
         )
 
     async def update_market_status(self, market_id: str, status: str):
+        """Set the status field for a single market (e.g. 'active' → 'settled')."""
         await self.pool.execute(
             "UPDATE markets SET status = $1, updated_at = NOW() WHERE id = $2",
             status,
             market_id,
         )
 
-    # --- Cost Analysis (Фаза 0) ---
+    # --- Cost Analysis (Phase 0) ---
 
     async def insert_cost_analysis(self, row: dict):
+        """Persist a Phase 0 cost analysis result row for a single market."""
         await self.pool.execute(
             """
             INSERT INTO cost_analysis (
@@ -106,9 +113,10 @@ class Repository:
             row.get("verdict"),
         )
 
-    # --- Price Snapshots (Фаза 1) ---
+    # --- Price Snapshots (Phase 1) ---
 
     async def insert_snapshot(self, snap: dict):
+        """Insert a price snapshot; silently skips duplicates via ON CONFLICT DO NOTHING."""
         await self.pool.execute(
             """
             INSERT INTO price_snapshots (
@@ -129,9 +137,10 @@ class Repository:
             snap.get("time_to_event_h"),
         )
 
-    # --- Trades (Фаза 1) ---
+    # --- Trades (Phase 1) ---
 
     async def insert_trade(self, trade: dict):
+        """Insert a trade record; silently skips duplicates via ON CONFLICT DO NOTHING."""
         await self.pool.execute(
             """
             INSERT INTO trades (ts, market_id, trade_id, price, size, side)
@@ -149,6 +158,7 @@ class Repository:
     # --- Spike Events ---
 
     async def insert_spike_event(self, event: dict):
+        """Persist a finalized spike event produced by SpikeTracker."""
         await self.pool.execute(
             """
             INSERT INTO spike_events
@@ -172,6 +182,7 @@ class Repository:
     # --- Data Gaps ---
 
     async def insert_gap(self, market_id: str, gap_start: datetime, reason: str):
+        """Open a new data gap record with the given start time and reason."""
         await self.pool.execute(
             """
             INSERT INTO data_gaps (market_id, gap_start, reason)
@@ -183,6 +194,7 @@ class Repository:
         )
 
     async def close_gap(self, market_id: str, gap_start: datetime, gap_end: datetime):
+        """Close an open data gap by setting gap_end and computing gap_minutes."""
         minutes = (gap_end - gap_start).total_seconds() / 60
         await self.pool.execute(
             """

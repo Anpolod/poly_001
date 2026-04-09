@@ -126,3 +126,29 @@ CREATE TABLE IF NOT EXISTS data_gaps (
     gap_minutes     NUMERIC(8,2),
     reason          TEXT  -- ws_disconnect / api_error / unknown
 );
+
+-- Prop scanner signal log (NBA player props pre-match scanner hits)
+CREATE TABLE IF NOT EXISTS prop_scan_log (
+    id           SERIAL PRIMARY KEY,
+    scanned_at   TIMESTAMPTZ DEFAULT NOW(),
+    market_id    TEXT NOT NULL,
+    slug         TEXT,
+    prop_type    TEXT,        -- points | rebounds | assists
+    player_name  TEXT,
+    threshold    TEXT,        -- e.g. '23.5'
+    game_start   TIMESTAMPTZ,
+    hours_until  FLOAT,
+    yes_price    FLOAT,
+    model_win    FLOAT,
+    ev_per_unit  FLOAT,
+    roi_pct      FLOAT,
+    bid_depth    FLOAT,
+    ask_depth    FLOAT,
+    outcome      SMALLINT,   -- 1 = YES won, 0 = NO won, NULL = not yet resolved
+    resolved_at  TIMESTAMPTZ,
+    alerted      BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_prop_scan_log_market
+    ON prop_scan_log (market_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_prop_scan_log_game_start
+    ON prop_scan_log (game_start);
