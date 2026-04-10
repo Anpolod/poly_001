@@ -572,3 +572,76 @@ async def run_backtest(pool: asyncpg.Pool) -> None:
         print(f"    T-6h  → close: median drift {median(drifts_6):+.4f}  |  {pct_positive(drifts_6):.0f}% positive")
 
     print(f"\n  Total markets analyzed: {len(results)}\n")
+
+
+# ---------------------------------------------------------------------------
+# Rotowire Lineup Monitor
+# ---------------------------------------------------------------------------
+
+
+async def check_lineup_news(
+    team_name: str,
+    session: aiohttp.ClientSession,
+) -> list[str]:
+    """Fetch Rotowire NBA lineups page and extract injury/status notes for team.
+
+    Returns list of strings like "Jayson Tatum - OUT (ankle)".
+    Returns empty list on any fetch/parse error (non-blocking).
+    """
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        logger.warning("beautifulsoup4 not installed; skipping lineup check. Run: pip install beautifulsoup4")
+        return []
+
+    try:
+        async with session.get(
+            _ROTOWIRE_URL,
+            timeout=aiohttp.ClientTimeout(total=15),
+            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"},
+        ) as r:
+            if r.status != 200:
+                return []
+            html = await r.text()
+    except Exception as exc:
+        logger.warning(f"Rotowire fetch failed: {exc}")
+        return []
+
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        notes: list[str] = []
+        team_name_lower = team_name.lower()
+
+        # Rotowire groups lineups by team. Look for team headers, then players.
+        for team_section in soup.find_all("div", class_=lambda c: c and "lineup__team" in c):
+            team_text = team_section.get_text(separator=" ", strip=True).lower()
+            # Match by any word of the team name (e.g. "Celtics", "Boston")
+            team_words = [w for w in team_name_lower.split() if len(w) > 3]
+            if not any(w in team_text for w in team_words):
+                continue
+
+            # Scan for OUT / QUESTIONABLE players in this section
+            for player_div in team_section.find_all("li"):
+                text = player_div.get_text(separator=" ", strip=True)
+                if any(status in text.upper() for status in ("OUT", "QUESTIONABLE", "DOUBTFUL")):
+                    notes.append(text[:120])
+
+        return notes
+
+    except Exception as exc:
+        logger.warning(f"Rotowire parse error: {exc}")
+        return []
+
+
+async def enrich_with_lineup_news(
+    signals: list[TankingSignal],
+    session: aiohttp.ClientSession,
+) -> None:
+    """Mutates signals in-place, adding lineup_notes for each motivated team."""
+    # Fetch Rotowire page once and pass raw HTML — avoid re-fetching per team.
+    # Use asyncio.gather for concurrent team lookups (they all share the same session).
+    tasks = [check_lineup_news(s.motivated_team, session) for s in signals]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for signal, result in zip(signals, results):
+        if isinstance(result, list):
+            signal.lineup_notes = result
