@@ -313,3 +313,137 @@ async def find_upcoming_nba_markets(
     )
 
     return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Pattern Scanner
+# ---------------------------------------------------------------------------
+
+
+def _pattern_strength(diff: float) -> str:
+    if abs(diff) >= 0.7:
+        return "HIGH"
+    if abs(diff) >= 0.4:
+        return "MODERATE"
+    return "WATCH"
+
+
+def _recommended_action(
+    strength: str,
+    current_price: float,
+    hours_to_game: float,
+) -> str:
+    if strength == "HIGH":
+        if current_price < 0.88 and hours_to_game > 8:
+            return "BUY"
+        if hours_to_game < 4:
+            return "SELL / CLOSE"
+    return "WATCH"
+
+
+async def scan_tanking_patterns(
+    pool: asyncpg.Pool,
+    standings: dict[str, TeamStanding],
+    aliases: dict[str, str],
+    min_differential: float = 0.4,
+    hours: float = 48.0,
+) -> list[TankingSignal]:
+    """Main scan: find upcoming NBA markets with high motivation_differential."""
+    markets = await find_upcoming_nba_markets(pool, hours)
+    if not markets:
+        return []
+
+    now = datetime.now(tz=timezone.utc)
+    signals: list[TankingSignal] = []
+
+    for m in markets:
+        teams = match_teams_in_question(m["question"] or "", aliases)
+        if len(teams) < 2:
+            continue
+
+        team_a_name, team_b_name = teams[0], teams[1]
+        team_a = standings.get(team_a_name)
+        team_b = standings.get(team_b_name)
+        if team_a is None or team_b is None:
+            continue
+
+        diff = team_a.motivation_score - team_b.motivation_score
+
+        if abs(diff) < min_differential:
+            continue
+
+        # Determine which team is motivated, which is tanking
+        if diff > 0:
+            motivated, tanking = team_a, team_b
+        else:
+            motivated, tanking = team_b, team_a
+
+        event_start: datetime = m["event_start"]
+        if event_start.tzinfo is None:
+            event_start = event_start.replace(tzinfo=timezone.utc)
+        hours_to_game = (event_start - now).total_seconds() / 3600
+
+        current_price = float(m["current_price"] or 0.0)
+        price_24h = float(m["price_24h_ago"]) if m["price_24h_ago"] is not None else None
+        drift = (current_price - price_24h) if price_24h is not None else None
+
+        strength = _pattern_strength(abs(diff))
+        action = _recommended_action(strength, current_price, hours_to_game)
+
+        signals.append(TankingSignal(
+            market_id=m["id"],
+            slug=m.get("slug", ""),
+            game_start=event_start,
+            hours_to_game=round(hours_to_game, 1),
+            motivated_team=motivated.display_name,
+            tanking_team=tanking.display_name,
+            motivation_differential=round(abs(diff), 2),
+            current_price=round(current_price, 4),
+            price_24h_ago=round(price_24h, 4) if price_24h is not None else None,
+            actual_drift=round(drift, 4) if drift is not None else None,
+            pattern_strength=strength,
+            recommended_action=action,
+        ))
+
+    # Sort: HIGH first, then by differential descending
+    signals.sort(key=lambda s: (-{"HIGH": 2, "MODERATE": 1, "WATCH": 0}[s.pattern_strength], -s.motivation_differential))
+    return signals
+
+
+def print_signals(signals: list[TankingSignal], title: str = "") -> None:
+    now_str = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    width = 110
+    print("=" * width)
+    print(f"  NBA TANKING PATTERN SCANNER  —  {now_str}")
+    if title:
+        print(f"  {title}")
+    print("=" * width)
+
+    if not signals:
+        print("\n  No tanking pattern matches found for the current filter.\n")
+        print("=" * width)
+        return
+
+    rows = []
+    for s in signals:
+        drift_str = f"{s.actual_drift:+.3f}" if s.actual_drift is not None else "—"
+        p24_str = f"{s.price_24h_ago:.3f}" if s.price_24h_ago is not None else "—"
+        rows.append([
+            s.pattern_strength,
+            s.recommended_action,
+            s.motivated_team[:22],
+            s.tanking_team[:22],
+            f"{s.motivation_differential:.2f}",
+            f"{s.current_price:.3f}",
+            p24_str,
+            drift_str,
+            f"{s.hours_to_game:.1f}h",
+            s.game_start.strftime("%m-%d %H:%M"),
+        ])
+
+    headers = [
+        "Strength", "Action", "Motivated Team", "Tanking Team",
+        "Diff", "Price", "24h ago", "Drift", "Game in", "Start"
+    ]
+    print("\n" + tabulate(rows, headers=headers, tablefmt="simple") + "\n")
+    print("=" * width)
