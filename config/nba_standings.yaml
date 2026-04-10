@@ -1,0 +1,246 @@
+# config/nba_standings.yaml
+# Manual fallback NBA standings — update when ESPN API fails.
+# rank = conference seed (1-15). games_remaining as of last manual update.
+# Last updated: 2026-04-10
+
+east:
+  - display_name: "Cleveland Cavaliers"
+    abbreviation: "CLE"
+    rank: 1
+    wins: 62
+    losses: 16
+    games_remaining: 4
+    games_back_from_1st: 0.0
+
+  - display_name: "Boston Celtics"
+    abbreviation: "BOS"
+    rank: 2
+    wins: 58
+    losses: 20
+    games_remaining: 4
+    games_back_from_1st: 4.0
+
+  - display_name: "New York Knicks"
+    abbreviation: "NYK"
+    rank: 3
+    wins: 54
+    losses: 24
+    games_remaining: 4
+    games_back_from_1st: 8.0
+
+  - display_name: "Indiana Pacers"
+    abbreviation: "IND"
+    rank: 4
+    wins: 51
+    losses: 27
+    games_remaining: 4
+    games_back_from_1st: 11.0
+
+  - display_name: "Milwaukee Bucks"
+    abbreviation: "MIL"
+    rank: 5
+    wins: 48
+    losses: 30
+    games_remaining: 4
+    games_back_from_1st: 14.0
+
+  - display_name: "Miami Heat"
+    abbreviation: "MIA"
+    rank: 6
+    wins: 46
+    losses: 32
+    games_remaining: 4
+    games_back_from_1st: 16.0
+
+  - display_name: "Chicago Bulls"
+    abbreviation: "CHI"
+    rank: 7
+    wins: 40
+    losses: 38
+    games_remaining: 4
+    games_back_from_1st: 22.0
+
+  - display_name: "Orlando Magic"
+    abbreviation: "ORL"
+    rank: 8
+    wins: 38
+    losses: 40
+    games_remaining: 4
+    games_back_from_1st: 24.0
+
+  - display_name: "Atlanta Hawks"
+    abbreviation: "ATL"
+    rank: 9
+    wins: 36
+    losses: 42
+    games_remaining: 4
+    games_back_from_1st: 26.0
+
+  - display_name: "Toronto Raptors"
+    abbreviation: "TOR"
+    rank: 10
+    wins: 34
+    losses: 44
+    games_remaining: 4
+    games_back_from_1st: 28.0
+
+  - display_name: "Brooklyn Nets"
+    abbreviation: "BKN"
+    rank: 11
+    wins: 24
+    losses: 54
+    games_remaining: 4
+    games_back_from_1st: 38.0
+
+  - display_name: "Charlotte Hornets"
+    abbreviation: "CHA"
+    rank: 12
+    wins: 22
+    losses: 56
+    games_remaining: 4
+    games_back_from_1st: 40.0
+
+  - display_name: "Washington Wizards"
+    abbreviation: "WAS"
+    rank: 13
+    wins: 20
+    losses: 58
+    games_remaining: 4
+    games_back_from_1st: 42.0
+
+  - display_name: "Detroit Pistons"
+    abbreviation: "DET"
+    rank: 14
+    wins: 18
+    losses: 60
+    games_remaining: 4
+    games_back_from_1st: 44.0
+
+  - display_name: "Philadelphia 76ers"
+    abbreviation: "PHI"
+    rank: 15
+    wins: 16
+    losses: 62
+    games_remaining: 4
+    games_back_from_1st: 46.0
+
+west:
+  - display_name: "Oklahoma City Thunder"
+    abbreviation: "OKC"
+    rank: 1
+    wins: 66
+    losses: 12
+    games_remaining: 4
+    games_back_from_1st: 0.0
+
+  - display_name: "Houston Rockets"
+    abbreviation: "HOU"
+    rank: 2
+    wins: 55
+    losses: 23
+    games_remaining: 4
+    games_back_from_1st: 11.0
+
+  - display_name: "Los Angeles Lakers"
+    abbreviation: "LAL"
+    rank: 3
+    wins: 52
+    losses: 26
+    games_remaining: 4
+    games_back_from_1st: 14.0
+
+  - display_name: "Denver Nuggets"
+    abbreviation: "DEN"
+    rank: 4
+    wins: 51
+    losses: 27
+    games_remaining: 4
+    games_back_from_1st: 15.0
+
+  - display_name: "Minnesota Timberwolves"
+    abbreviation: "MIN"
+    rank: 5
+    wins: 50
+    losses: 28
+    games_remaining: 4
+    games_back_from_1st: 16.0
+
+  - display_name: "Golden State Warriors"
+    abbreviation: "GSW"
+    rank: 6
+    wins: 46
+    losses: 32
+    games_remaining: 4
+    games_back_from_1st: 20.0
+
+  - display_name: "LA Clippers"
+    abbreviation: "LAC"
+    rank: 7
+    wins: 42
+    losses: 36
+    games_remaining: 4
+    games_back_from_1st: 24.0
+
+  - display_name: "Dallas Mavericks"
+    abbreviation: "DAL"
+    rank: 8
+    wins: 40
+    losses: 38
+    games_remaining: 4
+    games_back_from_1st: 26.0
+
+  - display_name: "Memphis Grizzlies"
+    abbreviation: "MEM"
+    rank: 9
+    wins: 36
+    losses: 42
+    games_remaining: 4
+    games_back_from_1st: 30.0
+
+  - display_name: "Phoenix Suns"
+    abbreviation: "PHX"
+    rank: 10
+    wins: 34
+    losses: 44
+    games_remaining: 4
+    games_back_from_1st: 32.0
+
+  - display_name: "Sacramento Kings"
+    abbreviation: "SAC"
+    rank: 11
+    wins: 32
+    losses: 46
+    games_remaining: 4
+    games_back_from_1st: 34.0
+
+  - display_name: "New Orleans Pelicans"
+    abbreviation: "NOP"
+    rank: 12
+    wins: 24
+    losses: 54
+    games_remaining: 4
+    games_back_from_1st: 42.0
+
+  - display_name: "Utah Jazz"
+    abbreviation: "UTA"
+    rank: 13
+    wins: 22
+    losses: 56
+    games_remaining: 4
+    games_back_from_1st: 44.0
+
+  - display_name: "San Antonio Spurs"
+    abbreviation: "SAS"
+    rank: 14
+    wins: 20
+    losses: 58
+    games_remaining: 4
+    games_back_from_1st: 46.0
+
+  - display_name: "Portland Trail Blazers"
+    abbreviation: "POR"
+    rank: 15
+    wins: 18
+    losses: 60
+    games_remaining: 4
+    games_back_from_1st: 48.0

@@ -1,0 +1,132 @@
+# config/nba_team_aliases.yaml
+# Maps Polymarket question fragments → canonical ESPN displayName
+# Keys must be lowercase substrings that appear in market questions.
+# Values must match ESPN "displayName" exactly.
+
+# Eastern Conference
+"76ers": "Philadelphia 76ers"
+"sixers": "Philadelphia 76ers"
+"philadelphia 76ers": "Philadelphia 76ers"
+"philadelphia": "Philadelphia 76ers"
+
+"bucks": "Milwaukee Bucks"
+"milwaukee bucks": "Milwaukee Bucks"
+"milwaukee": "Milwaukee Bucks"
+
+"celtics": "Boston Celtics"
+"boston celtics": "Boston Celtics"
+"boston": "Boston Celtics"
+
+"nets": "Brooklyn Nets"
+"brooklyn nets": "Brooklyn Nets"
+"brooklyn": "Brooklyn Nets"
+
+"knicks": "New York Knicks"
+"new york knicks": "New York Knicks"
+"new york": "New York Knicks"
+
+"raptors": "Toronto Raptors"
+"toronto raptors": "Toronto Raptors"
+"toronto": "Toronto Raptors"
+
+"bulls": "Chicago Bulls"
+"chicago bulls": "Chicago Bulls"
+"chicago": "Chicago Bulls"
+
+"cavaliers": "Cleveland Cavaliers"
+"cavs": "Cleveland Cavaliers"
+"cleveland cavaliers": "Cleveland Cavaliers"
+"cleveland": "Cleveland Cavaliers"
+
+"pistons": "Detroit Pistons"
+"detroit pistons": "Detroit Pistons"
+"detroit": "Detroit Pistons"
+
+"pacers": "Indiana Pacers"
+"indiana pacers": "Indiana Pacers"
+"indiana": "Indiana Pacers"
+
+"heat": "Miami Heat"
+"miami heat": "Miami Heat"
+"miami": "Miami Heat"
+
+"hawks": "Atlanta Hawks"
+"atlanta hawks": "Atlanta Hawks"
+"atlanta": "Atlanta Hawks"
+
+"hornets": "Charlotte Hornets"
+"charlotte hornets": "Charlotte Hornets"
+"charlotte": "Charlotte Hornets"
+
+"magic": "Orlando Magic"
+"orlando magic": "Orlando Magic"
+"orlando": "Orlando Magic"
+
+"wizards": "Washington Wizards"
+"washington wizards": "Washington Wizards"
+"washington": "Washington Wizards"
+
+# Western Conference
+"lakers": "Los Angeles Lakers"
+"los angeles lakers": "Los Angeles Lakers"
+"la lakers": "Los Angeles Lakers"
+
+"clippers": "LA Clippers"
+"los angeles clippers": "LA Clippers"
+"la clippers": "LA Clippers"
+
+"warriors": "Golden State Warriors"
+"golden state warriors": "Golden State Warriors"
+"golden state": "Golden State Warriors"
+
+"suns": "Phoenix Suns"
+"phoenix suns": "Phoenix Suns"
+"phoenix": "Phoenix Suns"
+
+"nuggets": "Denver Nuggets"
+"denver nuggets": "Denver Nuggets"
+"denver": "Denver Nuggets"
+
+"jazz": "Utah Jazz"
+"utah jazz": "Utah Jazz"
+"utah": "Utah Jazz"
+
+"trail blazers": "Portland Trail Blazers"
+"blazers": "Portland Trail Blazers"
+"portland trail blazers": "Portland Trail Blazers"
+"portland": "Portland Trail Blazers"
+
+"thunder": "Oklahoma City Thunder"
+"oklahoma city thunder": "Oklahoma City Thunder"
+"oklahoma city": "Oklahoma City Thunder"
+"okc": "Oklahoma City Thunder"
+
+"timberwolves": "Minnesota Timberwolves"
+"wolves": "Minnesota Timberwolves"
+"minnesota timberwolves": "Minnesota Timberwolves"
+"minnesota": "Minnesota Timberwolves"
+
+"spurs": "San Antonio Spurs"
+"san antonio spurs": "San Antonio Spurs"
+"san antonio": "San Antonio Spurs"
+
+"rockets": "Houston Rockets"
+"houston rockets": "Houston Rockets"
+"houston": "Houston Rockets"
+
+"mavericks": "Dallas Mavericks"
+"mavs": "Dallas Mavericks"
+"dallas mavericks": "Dallas Mavericks"
+"dallas": "Dallas Mavericks"
+
+"grizzlies": "Memphis Grizzlies"
+"memphis grizzlies": "Memphis Grizzlies"
+"memphis": "Memphis Grizzlies"
+
+"pelicans": "New Orleans Pelicans"
+"new orleans pelicans": "New Orleans Pelicans"
+"new orleans": "New Orleans Pelicans"
+
+"kings": "Sacramento Kings"
+"sacramento kings": "Sacramento Kings"
+"sacramento": "Sacramento Kings"
