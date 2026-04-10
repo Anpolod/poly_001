@@ -17,6 +17,15 @@ python db/init_schema.py
 # Phase 0 — one-time cost analysis scan (generates phase0_results.csv and populates DB)
 python cost_analyzer.py
 
+# Phase 0 + immediately backfill cost_estimates from CSV and any existing snapshots
+python cost_analyzer.py --backfill
+
+# Force full rescan (ignore checkpoint from a previous partial run)
+python cost_analyzer.py --fresh
+
+# Backfill cost_estimates only (without re-running Phase 0 scan)
+python -m analytics.cost_backfill
+
 # Phase 1 — continuous 24/7 data collection
 python main.py
 
@@ -25,6 +34,64 @@ nohup python main.py > logs/stdout.log 2>&1 &
 ```
 
 There is no formal test runner. The files in `tests/` are exploratory scripts run directly with `python tests/<file>.py`.
+
+## Analytics CLI
+
+```bash
+# Movement analyzer — early GO candidates
+python -m analytics.movement_analyzer
+python -m analytics.movement_analyzer --sport basketball
+python -m analytics.movement_analyzer --from-date 2026-04-01 --to-date 2026-04-05
+python -m analytics.movement_analyzer --min-snapshots 20 --output report.csv
+
+# Spike vs Drift — classify markets by movement type
+python -m analytics.spike_vs_drift_report
+python -m analytics.spike_vs_drift_report --min-snapshots 30 --output drift.csv
+
+# Timing analyzer — per-market row-by-row chart
+python -m analytics.timing_analyzer --market nba-det-phi-2026-04-04
+python -m analytics.timing_analyzer --market nba-det-phi --hours 24 --summary-only
+
+# Backtester — replay price_snapshots with drift/reversion signals
+python -m analytics.backtester
+python -m analytics.backtester --signal drift --threshold 0.03 --hold 60
+
+# Historical calibration fetcher — populate historical_calibration table (run once)
+python -m analytics.historical_fetcher          # full fetch (~133k markets)
+python -m analytics.historical_fetcher --limit 500 --no-skip   # test run
+
+# Calibration analyzer — pre-game pricing vs actual outcomes
+python -m analytics.calibration_analyzer                    # uses historical_calibration table
+python -m analytics.calibration_analyzer --sport basketball
+python -m analytics.calibration_analyzer --market-type points --window 12h
+python -m analytics.calibration_analyzer --output calibration.csv
+
+# Player prop scanner — find positive-EV NBA prop markets (run 6-12h before tip-off)
+python -m analytics.prop_scanner
+python -m analytics.prop_scanner --min-ev 0.05 --hours 12
+python -m analytics.prop_scanner --watch              # auto-refresh every 5 min (no DB)
+
+# Prop scanner daemon — persistent mode: logs to DB, Slack alerts, auto-resolves outcomes
+python -m analytics.prop_scanner --daemon --once      # single cycle (test)
+python -m analytics.prop_scanner --daemon             # runs indefinitely (every 5 min)
+make scanner-daemon                                    # background (logs → logs/scanner.log)
+
+# Obsidian reports — generate markdown files in obsidian/ for review in Obsidian
+python -m analytics.obsidian_reporter                 # all reports (daily, P&L, calibration)
+python -m analytics.obsidian_reporter --date 2026-04-05
+python -m analytics.obsidian_reporter --report pnl
+make obsidian
+
+# Tanking scanner — detect motivated vs. tanking NBA matchups (end-of-season edge)
+python -m analytics.tanking_scanner                           # scan next 48h games
+python -m analytics.tanking_scanner --min-differential 0.6    # only HIGH+ signals
+python -m analytics.tanking_scanner --hours 24                # next 24h only
+python -m analytics.tanking_scanner --backtest                # validate on collected data
+python -m analytics.tanking_scanner --watch                   # refresh every 30 min
+python -m analytics.tanking_scanner --save                    # persist to tanking_signals table
+make tanking                                                   # convenience alias
+make tanking-backtest
+```
 
 ## Architecture
 
