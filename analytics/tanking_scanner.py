@@ -447,3 +447,128 @@ def print_signals(signals: list[TankingSignal], title: str = "") -> None:
     ]
     print("\n" + tabulate(rows, headers=headers, tablefmt="simple") + "\n")
     print("=" * width)
+
+
+# ---------------------------------------------------------------------------
+# Historical Backtest
+# ---------------------------------------------------------------------------
+
+
+async def run_backtest(pool: asyncpg.Pool) -> None:
+    """Validate tanking drift hypothesis against collected price_snapshots.
+
+    Finds closed NBA markets where we have snapshots from ≥24h before market close.
+    Computes drift at T-24h, T-12h, T-6h, T-2h.
+    Groups by 'was the team a heavy favorite?' (YES price > 0.75 at T-24h).
+    """
+    print("\nRunning historical backtest on collected price_snapshots...")
+
+    # Find NBA markets that have ended (event_start in the past) and have snapshots
+    markets = await pool.fetch(
+        """
+        SELECT m.id, m.question, m.event_start,
+               COUNT(ps.ts) AS n_snapshots,
+               MIN(ps.ts)   AS first_snapshot,
+               MAX(ps.ts)   AS last_snapshot
+        FROM markets m
+        JOIN price_snapshots ps ON ps.market_id = m.id
+        WHERE (m.league ILIKE '%nba%' OR m.sport ILIKE '%basketball%')
+          AND m.event_start < NOW() - INTERVAL '3 hours'
+        GROUP BY m.id, m.question, m.event_start
+        HAVING COUNT(ps.ts) >= 10
+           AND MIN(ps.ts) <= m.event_start - INTERVAL '24 hours'
+        ORDER BY m.event_start DESC
+        LIMIT 500
+        """
+    )
+
+    if not markets:
+        print("  No qualifying markets found (need ≥10 snapshots starting ≥24h before game).")
+        return
+
+    print(f"  Found {len(markets)} qualifying markets. Computing drift windows...")
+
+    results = []
+    for row in markets:
+        mid = row["id"]
+        event_start = row["event_start"]
+        if event_start.tzinfo is None:
+            event_start = event_start.replace(tzinfo=timezone.utc)
+
+        # Fetch prices at T-24h, T-12h, T-6h, T-2h and at close (latest before event_start)
+        price_rows = await pool.fetch(
+            """
+            SELECT ts, mid_price FROM price_snapshots
+            WHERE market_id = $1
+              AND ts <= $2
+            ORDER BY ts DESC
+            """,
+            mid,
+            event_start,
+        )
+
+        def price_at_offset(hours_before: float) -> Optional[float]:
+            target = event_start - timedelta(hours=hours_before)
+            candidates = [
+                r for r in price_rows
+                if abs((r["ts"] - target).total_seconds()) < 3600
+            ]
+            if not candidates:
+                return None
+            closest = min(candidates, key=lambda r: abs((r["ts"] - target).total_seconds()))
+            return float(closest["mid_price"])
+
+        p_close = price_at_offset(0.5)
+        p_24h = price_at_offset(24.0)
+        p_12h = price_at_offset(12.0)
+        p_6h = price_at_offset(6.0)
+        p_2h = price_at_offset(2.0)
+
+        if p_24h is None or p_close is None:
+            continue
+
+        # "Heavy favorite" proxy for motivated team identification
+        is_heavy_fav = p_24h > 0.75
+
+        results.append({
+            "market_id": mid,
+            "is_heavy_fav": is_heavy_fav,
+            "drift_24_to_close": round((p_close - p_24h), 4) if p_close else None,
+            "drift_12_to_close": round((p_close - p_12h), 4) if p_12h and p_close else None,
+            "drift_6_to_close": round((p_close - p_6h), 4) if p_6h and p_close else None,
+            "drift_2_to_close": round((p_close - p_2h), 4) if p_2h and p_close else None,
+            "p_24h": p_24h,
+            "p_close": p_close,
+        })
+
+    if not results:
+        print("  No results after computing drift (insufficient price coverage).")
+        return
+
+    # Report
+    for label, fav_filter in [("Heavy Favorite (price > 0.75 at T-24h)", True),
+                               ("Non-Favorite (price ≤ 0.75 at T-24h)", False)]:
+        subset = [r for r in results if r["is_heavy_fav"] == fav_filter]
+        if not subset:
+            continue
+
+        drifts_24 = [r["drift_24_to_close"] for r in subset if r["drift_24_to_close"] is not None]
+        drifts_12 = [r["drift_12_to_close"] for r in subset if r["drift_12_to_close"] is not None]
+        drifts_6  = [r["drift_6_to_close"]  for r in subset if r["drift_6_to_close"]  is not None]
+
+        def median(vals: list[float]) -> float:
+            if not vals:
+                return 0.0
+            s = sorted(vals)
+            n = len(s)
+            return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+        def pct_positive(vals: list[float]) -> float:
+            return sum(1 for v in vals if v > 0) / len(vals) * 100 if vals else 0.0
+
+        print(f"\n  {label} — {len(subset)} markets")
+        print(f"    T-24h → close: median drift {median(drifts_24):+.4f}  |  {pct_positive(drifts_24):.0f}% positive  |  max {max(drifts_24, default=0):+.4f}  min {min(drifts_24, default=0):+.4f}")
+        print(f"    T-12h → close: median drift {median(drifts_12):+.4f}  |  {pct_positive(drifts_12):.0f}% positive")
+        print(f"    T-6h  → close: median drift {median(drifts_6):+.4f}  |  {pct_positive(drifts_6):.0f}% positive")
+
+    print(f"\n  Total markets analyzed: {len(results)}\n")
