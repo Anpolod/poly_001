@@ -230,3 +230,86 @@ async def get_standings(session: aiohttp.ClientSession) -> dict[str, TeamStandin
         raw = load_standings_from_fallback()
 
     return build_standings(raw)
+
+
+# ---------------------------------------------------------------------------
+# Market Matcher
+# ---------------------------------------------------------------------------
+
+
+def match_teams_in_question(
+    question: str,
+    aliases: dict[str, str],
+) -> list[str]:
+    """Return list of canonical team names found in the market question string.
+
+    Uses substring matching (alias.lower() in question.lower()).
+    Returns at most 2 teams, longest-match-first to avoid partial overlaps
+    (e.g. "lakers" matching before "los angeles lakers").
+    """
+    q = question.lower()
+    # Sort by alias length descending so longer aliases win
+    matched_canonical: list[str] = []
+    seen_canonical: set[str] = set()
+
+    for alias in sorted(aliases.keys(), key=len, reverse=True):
+        canonical = aliases[alias]
+        if alias in q and canonical not in seen_canonical:
+            matched_canonical.append(canonical)
+            seen_canonical.add(canonical)
+        if len(matched_canonical) == 2:
+            break
+
+    return matched_canonical
+
+
+async def find_upcoming_nba_markets(
+    pool: asyncpg.Pool,
+    hours: float = 48.0,
+) -> list[dict]:
+    """Query DB for NBA markets starting within `hours` that have at least one snapshot.
+
+    Returns list of dicts with keys:
+      id, question, slug, event_start, current_price, snapshot_ts, price_24h_ago
+    """
+    rows = await pool.fetch(
+        """
+        SELECT
+            m.id,
+            m.question,
+            m.slug,
+            m.event_start,
+            latest.mid_price  AS current_price,
+            latest.ts         AS snapshot_ts,
+            old24.mid_price   AS price_24h_ago
+        FROM markets m
+        LEFT JOIN LATERAL (
+            SELECT mid_price, ts
+            FROM price_snapshots
+            WHERE market_id = m.id
+            ORDER BY ts DESC
+            LIMIT 1
+        ) latest ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT mid_price
+            FROM price_snapshots
+            WHERE market_id = m.id
+              AND ts BETWEEN NOW() - INTERVAL '26 hours'
+                        AND NOW() - INTERVAL '22 hours'
+            ORDER BY ABS(EXTRACT(EPOCH FROM (ts - (NOW() - INTERVAL '24 hours'))))
+            LIMIT 1
+        ) old24 ON TRUE
+        WHERE (
+            m.league ILIKE '%nba%'
+            OR m.question ILIKE '%nba%'
+            OR (m.sport ILIKE '%basketball%' AND m.league ILIKE '%nba%')
+        )
+        AND m.event_start BETWEEN NOW() AND NOW() + ($1 * INTERVAL '1 hour')
+        AND m.status = 'active'
+        AND latest.mid_price IS NOT NULL
+        ORDER BY m.event_start
+        """,
+        float(hours),
+    )
+
+    return [dict(r) for r in rows]
