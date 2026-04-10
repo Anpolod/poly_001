@@ -645,3 +645,175 @@ async def enrich_with_lineup_news(
     for signal, result in zip(signals, results):
         if isinstance(result, list):
             signal.lineup_notes = result
+
+
+# ---------------------------------------------------------------------------
+# DB Logging
+# ---------------------------------------------------------------------------
+
+
+async def log_signals_to_db(pool: asyncpg.Pool, signals: list[TankingSignal]) -> int:
+    """Insert signals into tanking_signals. Skips duplicates (same market_id in last 6h).
+    Returns count of newly inserted rows.
+    """
+    inserted = 0
+    async with pool.acquire() as conn:
+        for s in signals:
+            existing = await conn.fetchval(
+                """
+                SELECT id FROM tanking_signals
+                WHERE market_id = $1
+                  AND scanned_at > NOW() - INTERVAL '6 hours'
+                LIMIT 1
+                """,
+                s.market_id,
+            )
+            if existing:
+                continue
+
+            await conn.execute(
+                """
+                INSERT INTO tanking_signals
+                    (market_id, game_start, motivated_team, tanking_team,
+                     motivation_differential, current_price, drift_24h,
+                     pattern_strength, action, lineup_notes)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                """,
+                s.market_id,
+                s.game_start,
+                s.motivated_team,
+                s.tanking_team,
+                s.motivation_differential,
+                s.current_price,
+                s.actual_drift,
+                s.pattern_strength,
+                s.recommended_action,
+                json.dumps(s.lineup_notes) if s.lineup_notes else None,
+            )
+            inserted += 1
+
+    return inserted
+
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+
+async def run(
+    config: dict,
+    min_differential: float,
+    hours: float,
+    watch: bool,
+    backtest: bool,
+    save_to_db: bool,
+) -> None:
+    db = config["database"]
+    pool = await asyncpg.create_pool(
+        host=db["host"],
+        port=db["port"],
+        database=db["name"],
+        user=db["user"],
+        password=str(db["password"]),
+        min_size=1,
+        max_size=3,
+    )
+
+    try:
+        if backtest:
+            await run_backtest(pool)
+            return
+
+        aliases = load_aliases()
+        first_run = True
+
+        async with aiohttp.ClientSession() as session:
+            while True:
+                standings = await get_standings(session)
+                signals = await scan_tanking_patterns(
+                    pool, standings, aliases, min_differential, hours
+                )
+
+                # Enrich with Rotowire lineup news for HIGH signals only
+                high_signals = [s for s in signals if s.pattern_strength == "HIGH"]
+                if high_signals:
+                    await enrich_with_lineup_news(high_signals, session)
+
+                print_signals(signals)
+
+                # Print lineup alerts inline
+                for s in high_signals:
+                    if s.lineup_notes:
+                        print(f"  ⚠ Lineup news for {s.motivated_team}:")
+                        for note in s.lineup_notes[:5]:
+                            print(f"    {note}")
+                        print()
+
+                if save_to_db and signals:
+                    n = await log_signals_to_db(pool, signals)
+                    if n:
+                        print(f"  Saved {n} new signal(s) to tanking_signals table.")
+
+                if not watch:
+                    break
+
+                print(f"  Refreshing in {_WATCH_INTERVAL_SEC // 60} min ... (Ctrl+C to exit)\n")
+                await asyncio.sleep(_WATCH_INTERVAL_SEC)
+
+    finally:
+        await pool.close()
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def _parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="NBA Tanking Pattern Scanner — find motivated vs. tanking matchups"
+    )
+    p.add_argument(
+        "--min-differential", type=float, default=0.4,
+        help="Minimum abs(motivation_differential) to include (default: 0.4 = MODERATE+)"
+    )
+    p.add_argument(
+        "--hours", type=float, default=48.0,
+        help="Only show games starting within N hours (default: 48)"
+    )
+    p.add_argument(
+        "--backtest", action="store_true",
+        help="Run historical backtest on collected price_snapshots"
+    )
+    p.add_argument(
+        "--watch", action="store_true",
+        help=f"Auto-refresh every {_WATCH_INTERVAL_SEC // 60} min"
+    )
+    p.add_argument(
+        "--save", action="store_true",
+        help="Persist signals to tanking_signals DB table"
+    )
+    p.add_argument("--config", default="config/settings.yaml")
+    return p.parse_args()
+
+
+if __name__ == "__main__":
+    args = _parse_args()
+    config_path = Path(args.config)
+    if not config_path.exists():
+        print(f"ERROR: {args.config} not found.")
+        sys.exit(1)
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    try:
+        asyncio.run(run(
+            config,
+            min_differential=args.min_differential,
+            hours=args.hours,
+            watch=args.watch,
+            backtest=args.backtest,
+            save_to_db=args.save,
+        ))
+    except KeyboardInterrupt:
+        print("\nStopped.")
