@@ -17,6 +17,9 @@
 "boston celtics": "Boston Celtics"
 "boston": "Boston Celtics"
 
+# NOTE: 'nets' is a substring of 'hornets'. The scanner MUST sort aliases by
+# length descending before iterating so 'hornets' matches before 'nets'.
+# See match_teams_in_question() in analytics/tanking_scanner.py.
 "nets": "Brooklyn Nets"
 "brooklyn nets": "Brooklyn Nets"
 "brooklyn": "Brooklyn Nets"
