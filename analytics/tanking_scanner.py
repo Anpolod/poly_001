@@ -98,13 +98,13 @@ async def fetch_standings_from_espn(session: aiohttp.ClientSession) -> list[Team
     standings: list[TeamStanding] = []
     for conference in data.get("children", []):
         conf_name = conference.get("name", "")
-        conf_short = "East" if "Eastern" in conf_name else "West"
+        conf_short = "East" if "east" in conf_name.lower() else "West"
         entries = conference.get("standings", {}).get("entries", [])
 
         for entry in entries:
             team = entry.get("team", {})
             stats_list = entry.get("stats", [])
-            stats = {s["name"]: s["value"] for s in stats_list}
+            stats = {s["name"]: s["value"] for s in stats_list if "name" in s and "value" in s}
 
             standings.append(TeamStanding(
                 display_name=team.get("displayName", "Unknown"),
@@ -125,8 +125,14 @@ async def fetch_standings_from_espn(session: aiohttp.ClientSession) -> list[Team
 
 def load_standings_from_fallback() -> list[TeamStanding]:
     """Load standings from config/nba_standings.yaml (manually maintained)."""
-    with open(_FALLBACK_STANDINGS_PATH) as f:
-        data = yaml.safe_load(f)
+    try:
+        with open(_FALLBACK_STANDINGS_PATH) as f:
+            data = yaml.safe_load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Fallback standings missing: {_FALLBACK_STANDINGS_PATH}. "
+            "Create it or ensure ESPN API is reachable."
+        )
 
     standings: list[TeamStanding] = []
     for conf_key, conf_short in (("east", "East"), ("west", "West")):
@@ -145,6 +151,17 @@ def load_standings_from_fallback() -> list[TeamStanding]:
     return standings
 
 
+def _gb_from_seed(
+    team: TeamStanding, seed_rank: int, conf_teams: list[TeamStanding]
+) -> float:
+    """Compute games back from a specific conference seed. Returns 0.0 if ahead."""
+    ref = next((t for t in conf_teams if t.rank == seed_rank), None)
+    if ref is None:
+        logger.warning("Seed %d not found in %s conference — GB defaulting to 0.0", seed_rank, team.conference)
+        return 0.0
+    return max(0.0, (ref.wins - team.wins + team.losses - ref.losses) / 2.0)
+
+
 def _compute_gb_margins(standings: list[TeamStanding]) -> None:
     """Mutates each TeamStanding to set games_back_from_6th and games_back_from_10th.
     Standard GB formula: GB = (wins_ref - wins_team + losses_team - losses_ref) / 2
@@ -155,17 +172,9 @@ def _compute_gb_margins(standings: list[TeamStanding]) -> None:
             [t for t in standings if t.conference == conf],
             key=lambda t: t.rank,
         )
-
-        def gb_from_seed(team: TeamStanding, seed_rank: int) -> float:
-            ref = next((t for t in conf_teams if t.rank == seed_rank), None)
-            if ref is None:
-                return 0.0
-            gb = (ref.wins - team.wins + team.losses - ref.losses) / 2.0
-            return max(0.0, gb)
-
         for team in conf_teams:
-            team.games_back_from_6th = gb_from_seed(team, 6)
-            team.games_back_from_10th = gb_from_seed(team, 10)
+            team.games_back_from_6th = _gb_from_seed(team, 6, conf_teams)
+            team.games_back_from_10th = _gb_from_seed(team, 10, conf_teams)
 
 
 def compute_motivation_score(team: TeamStanding) -> float:
@@ -174,7 +183,7 @@ def compute_motivation_score(team: TeamStanding) -> float:
     1.0  = direct playoff spot locked or within reach (GB <= 3 from 6th seed)
     0.7  = in play-in or close (GB <= 3 from 10th seed)
     0.0  = eliminated (no path to play-in)
-   -0.3  = deeply eliminated with active tanking incentive (>=5 GB from 10th, >=10 games left)
+   -0.3  = deeply eliminated with active tanking incentive (>= 5 GB from 10th, eliminated)
     """
     gb6 = team.games_back_from_6th
     gb10 = team.games_back_from_10th
@@ -194,8 +203,9 @@ def compute_motivation_score(team: TeamStanding) -> float:
 
     # Mathematically eliminated from play-in
     if gb10 > rem:
-        # Deep elimination with tanking incentive
-        if gb10 >= 5 and rem >= 10:
+        # Deep elimination = active tanking incentive (no rem >= 10 guard —
+        # this scanner runs specifically at end of season when rem is small)
+        if gb10 >= 5:
             return -0.3
         return 0.0
 
