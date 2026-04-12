@@ -14,20 +14,19 @@ The compiled knowledge in `_compiled/` is auto-built from JSONL conversation log
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Setup
+## Environment (Windows)
 
-```bash
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp config/settings.example.yaml config/settings.yaml  # then fill in DB credentials and API URLs
-python db/init_schema.py
+The venv was created on macOS and does not work on Windows. Use system Python 3.12:
 ```
+C:/Users/siriu/AppData/Local/Programs/Python/Python312/python.exe
+```
+`psql` is not in PATH — query the DB via Python (asyncpg). DB runs in Docker on port 5433.
 
 ## Running
 
 ```bash
-# Phase 0 — one-time cost analysis scan (generates phase0_results.csv and populates DB)
-python cost_analyzer.py
+# Phase 1 — start collector (background)
+/c/Users/siriu/AppData/Local/Programs/Python/Python312/python.exe main.py >> logs/stdout.log 2>&1 &
 
 # Phase 0 + immediately backfill cost_estimates from CSV and any existing snapshots
 python cost_analyzer.py --backfill
@@ -41,11 +40,23 @@ python -m analytics.cost_backfill
 # Phase 1 — continuous 24/7 data collection
 python main.py
 
-# Background mode
-nohup python main.py > logs/stdout.log 2>&1 &
+# Backfill cost_estimates only
+/c/Users/siriu/AppData/Local/Programs/Python/Python312/python.exe -m analytics.cost_backfill
 ```
 
-There is no formal test runner. The files in `tests/` are exploratory scripts run directly with `python tests/<file>.py`.
+All analytics modules accept `--help` for full option list:
+```bash
+PYTHON=/c/Users/siriu/AppData/Local/Programs/Python/Python312/python.exe
+$PYTHON -m analytics.movement_analyzer --help
+$PYTHON -m analytics.spike_vs_drift_report --help
+$PYTHON -m analytics.timing_analyzer --help
+$PYTHON -m analytics.backtester --help
+$PYTHON -m analytics.calibration_analyzer --help
+$PYTHON -m analytics.prop_scanner --help
+$PYTHON -m analytics.obsidian_reporter --help
+```
+
+Tests are exploratory scripts: `python tests/<file>.py` (no formal test runner).
 
 ## Dashboard
 
@@ -117,78 +128,70 @@ make tanking-backtest
 
 ## Architecture
 
-The project has two distinct phases:
+**Phase 0 (`cost_analyzer.py`)** — discovers all Polymarket sports markets via REST, calculates round-trip trading costs and price-move ratios, emits CSV + DB records with verdict:
+- **GO**: ratio ≥ 2.0 | **MARGINAL**: 1.5–2.0 | **NO_GO**: < 1.5
+- `ratio = (price_move / mid_price * 100) / taker_cost_pct`
 
-**Phase 0 (`cost_analyzer.py`)** — discovers all Polymarket sports markets via REST, calculates round-trip trading costs and price-move ratios, and emits a CSV + DB records with a verdict per market:
-- **GO**: ratio ≥ 2.0
-- **MARGINAL**: 1.5–2.0
-- **NO_GO**: < 1.5
-
-where `ratio = (price_move / mid_price * 100) / taker_cost_pct`
-
-**Phase 1 (`main.py`)** — runs continuously: takes price snapshots every 5 min, captures real-time trades via WebSocket, rescans markets every hour, and records data gaps on disconnect.
+**Phase 1 (`main.py`)** — runs continuously: snapshots every 5 min, real-time trades via WebSocket, market rescan every hour, logs data gaps on disconnect.
 
 ### Key modules
 
 | Module | Role |
 |---|---|
-| `collector/rest_client.py` | Async HTTP client for Gamma API (events/markets) and CLOB API (orderbooks, fees, history) |
-| `collector/ws_client.py` | WebSocket subscription with exponential backoff (5s base → 60s max); accepts `on_trade` callback |
-| `collector/market_discovery.py` | Filters markets by volume, spread, and depth |
+| `collector/rest_client.py` | Async HTTP — Gamma API (events/markets) + CLOB API (orderbooks, fees, history) |
+| `collector/ws_client.py` | WebSocket with exponential backoff; buffers trades (flush at 10 items or 30s); callbacks: `on_trade`, `on_spike`, `on_reconnect` |
+| `collector/spike_tracker.py` | Per-market spike detector — consecutive same-direction CLOB steps → `spike_finalized` dict |
+| `collector/market_discovery.py` | Filters markets by volume, spread, depth |
 | `collector/normalizer.py` | Normalizes raw API responses |
-| `analytics/cost_analyzer.py` | Core cost math: taker RT = `(fee_rate*2 + spread + slippage)`, maker RT = `(spread*adverse_mult - rebate)` |
-| `db/repository.py` | asyncpg connection pool (2–10 conns); idempotent upserts via `ON CONFLICT` |
-| `db/schema.sql` | TimescaleDB schema — `price_snapshots` and `trades` are hypertables partitioned by time |
+| `analytics/cost_analyzer.py` | Cost math: taker RT = `fee_rate*2 + spread + slippage`; maker RT = `spread*adverse_mult - rebate` |
+| `alerts/logger_alert.py` | Logs always; POSTs to Slack webhook if configured (failures never crash collector) |
+| `db/repository.py` | asyncpg pool (2–10 conns); idempotent upserts via `ON CONFLICT` |
 
 ### Data flow
 
 ```
-Phase 0: REST APIs → CostAnalyzer → CSV + DB (cost_analysis table)
-Phase 1: REST + WebSocket → Normalizer → Repository (price_snapshots, trades, data_gaps)
+Phase 0: REST APIs → CostAnalyzer → CSV + DB (cost_analysis)
+Phase 1: REST + WebSocket → Normalizer → Repository (price_snapshots, trades, spike_events)
          └─ MarketDiscovery rescans every 3600s
-```
-
-## Configuration (`config/settings.yaml`)
-
-Key thresholds to know:
-
-```yaml
-phase0:
-  ratio_go_threshold: 2.0
-  ratio_marginal_threshold: 1.5
-  min_volume_24h: 5000
-phase1:
-  snapshot_interval_sec: 300
-  market_rescan_interval_sec: 3600
-  min_volume_24h: 10000
-  max_spread: 0.03
-  min_depth: 1000
-collector:
-  ws_reconnect_base_delay: 5
-  ws_reconnect_max_delay: 60
-  gap_threshold_minutes: 5
 ```
 
 ## Database
 
-PostgreSQL + TimescaleDB. Core tables: `markets`, `cost_analysis`, `price_snapshots` (hypertable), `trades` (hypertable), `data_gaps`. Indexes are on `(market_id, ts)` for time-range queries.
+PostgreSQL 16 + TimescaleDB, port 5433. `price_snapshots` and `trades` are hypertables. All time-range indexes on `(market_id, ts)`.
+
+| Table | Purpose |
+|---|---|
+| `markets` | Metadata: sport, league, event_start, token IDs, status |
+| `cost_analysis` | Phase 0 results: spreads, depths, move ratios, verdict |
+| `cost_estimates` | Live-computed costs for markets not in cost_analysis |
+| `price_snapshots` | 5-min orderbook snapshots (hypertable) |
+| `trades` | Real-time WS trades (hypertable) |
+| `spike_events` | Price spikes from SpikeTracker; post-spike prices backfilled by scheduled job |
+| `data_gaps` | Snapshot collection interruptions |
+| `prop_scan_log` | Prop scanner hits: EV, ROI, outcome |
+| `historical_calibration` | Resolved market price history (populated once by `historical_fetcher`) |
 
 ## Async patterns
 
-Every I/O function uses `async/await`. DB access always goes through `db/repository.py`'s connection pool — never instantiate `asyncpg` connections directly. WS callbacks (`on_trade`) are sync functions called inside an async event loop; keep them non-blocking. When reading async tracebacks, the root cause is usually the innermost `await` line, not where the exception surfaces.
+All I/O uses `async/await`. Never instantiate `asyncpg` connections directly — always use `db/repository.py`'s pool. WS callbacks (`on_trade`) run inside the async loop — keep them non-blocking. In async tracebacks the root cause is the innermost `await`, not the surface exception.
 
-## Debug commands
+## Debug
+
+```python
+# Query DB (no psql on Windows)
+import asyncio, yaml, asyncpg
+async def q():
+    cfg = yaml.safe_load(open('config/settings.yaml'))['database']
+    conn = await asyncpg.connect(host=cfg['host'], port=cfg['port'],
+                                  database=cfg['name'], user=cfg['user'], password=str(cfg['password']))
+    rows = await conn.fetch("YOUR QUERY")
+    await conn.close()
+    return rows
+print(asyncio.run(q()))
+```
 
 ```bash
-# Tail live collector logs
+# Collector status
 tail -f logs/collector.log
-
-# Check how many snapshots have been collected per market (last 24h)
-psql -d <dbname> -c "SELECT market_id, COUNT(*) FROM price_snapshots WHERE ts > NOW() - INTERVAL '24h' GROUP BY market_id ORDER BY COUNT DESC LIMIT 20;"
-
-# Check for recent data gaps
-psql -d <dbname> -c "SELECT * FROM data_gaps ORDER BY started_at DESC LIMIT 10;"
-
-# Verify API reachability
-python -c "import asyncio, aiohttp; asyncio.run(aiohttp.ClientSession().get('https://gamma-api.polymarket.com/markets?limit=1').close())"
+tasklist | grep python          # check process alive
 ```

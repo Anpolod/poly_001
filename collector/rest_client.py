@@ -45,6 +45,11 @@ class RestClient:
                     else:
                         logger.warning(f"HTTP {resp.status} for {url}")
                         return None
+            except RuntimeError as e:
+                if "Session is closed" in str(e):
+                    logger.info("HTTP session closed (shutting down)")
+                    return None
+                raise
             except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 logger.warning(f"Request failed (attempt {attempt+1}): {e}")
                 await asyncio.sleep(5 * (attempt + 1))

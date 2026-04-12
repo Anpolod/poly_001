@@ -91,6 +91,9 @@ class Collector:
     async def stop(self):
         """Gracefully stop the collector and close all connections."""
         self._running = False
+        logger.info("Stopping collector...")
+        # Give loops a moment to notice _running=False and exit
+        await asyncio.sleep(1)
         if self.ws:
             await self.ws.stop()
         await self.rest.close()
@@ -287,10 +290,15 @@ async def main():
 
     try:
         await collector.start()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
+    finally:
         await collector.stop()
 
 
 if __name__ == "__main__":
     Path("logs").mkdir(exist_ok=True)
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
