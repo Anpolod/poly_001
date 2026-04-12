@@ -1,3 +1,6 @@
+streamlit>=1.30.0
+psycopg2-binary>=2.9
+plotly>=5.20
 aiohappyeyeballs==2.6.1
 beautifulsoup4>=4.12
 PyYAML==6.0.3

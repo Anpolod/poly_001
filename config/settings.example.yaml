@@ -1,5 +1,5 @@
 # Polymarket Sports — Configuration
-# Скопіюй цей файл як settings.yaml і заповни свої параметри
+# Copy this file to settings.yaml and fill in your parameters
 
 database:
   host: localhost      # override: DB_HOST env var
@@ -12,23 +12,23 @@ api:
   gamma_base_url: "https://gamma-api.polymarket.com"
   clob_base_url: "https://clob.polymarket.com"
   ws_url: "wss://ws-subscriptions-clob.polymarket.com/ws/market"
-  request_delay_sec: 1.0  # між запитами до API
+  request_delay_sec: 1.0  # seconds between API requests
 
 phase0:
-  min_volume_24h: 5000          # $ мінімум для включення ринку
-  est_slippage_pct: 0.5         # % оцінка slippage
-  adverse_selection_mult: 1.5   # множник spread для maker adverse selection
-  maker_rebate_pct: 25          # % від taker fee
-  ratio_go_threshold: 2.0       # ratio вище = GO
-  ratio_marginal_threshold: 1.5 # ratio вище = MARGINAL
+  min_volume_24h: 5000          # $ minimum volume to include a market
+  est_slippage_pct: 0.5         # % estimated slippage
+  adverse_selection_mult: 1.5   # spread multiplier for maker adverse selection
+  maker_rebate_pct: 25          # % of taker fee returned as maker rebate
+  ratio_go_threshold: 2.0       # ratio above this = GO
+  ratio_marginal_threshold: 1.5 # ratio above this = MARGINAL
   output_file: "phase0_results.csv"
 
 phase1:
-  snapshot_interval_sec: 60     # 1 хвилина
-  market_rescan_interval_sec: 3600  # 1 година
-  min_volume_24h: 10000         # $ мінімум для підписки
-  max_spread: 0.03              # 3¢ максимум
-  min_depth: 1000               # $ мінімум глибини стакану
+  snapshot_interval_sec: 60     # 1 minute
+  market_rescan_interval_sec: 3600  # 1 hour
+  min_volume_24h: 10000         # $ minimum volume for subscription
+  max_spread: 0.03              # 3¢ maximum spread
+  min_depth: 1000               # $ minimum orderbook depth
 
 # Optional overrides for filter_tradeable() thresholds.
 # If omitted, falls back to phase1 values (min_volume_24h, max_spread, min_depth).
@@ -47,8 +47,15 @@ collector:
   rest_fallback_interval: 30
   gap_threshold_minutes: 5
   heartbeat_interval: 60
+  ws_silence_threshold_sec: 60      # seconds of WS silence before REST fallback kicks in
   ws_orderbook_subscribe: true      # enable tick-level orderbook updates via WS
   spike_detection_realtime: true    # flag consecutive 1¢ moves in-stream
+
+alerts:
+  # Slack Incoming Webhook URL — leave blank to disable Slack notifications.
+  # Create one at: https://api.slack.com/messaging/webhooks
+  # Triggers: Phase 0 summary, collector start, data gap, spike, WS reconnect loop (≥3 attempts)
+  slack_webhook_url: ""
 
 logging:
   level: INFO

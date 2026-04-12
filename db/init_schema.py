@@ -1,9 +1,10 @@
-"""Ініціалізація бази даних — створення таблиць з schema.sql"""
+"""Database initialisation — creates tables from schema.sql."""
 
 import asyncio
+from pathlib import Path
+
 import asyncpg
 import yaml
-from pathlib import Path
 
 
 async def init_database():
@@ -13,7 +14,7 @@ async def init_database():
 
     db = config["database"]
 
-    print(f"Підключення до PostgreSQL: {db['host']}:{db['port']}/{db['name']}")
+    print(f"Connecting to PostgreSQL: {db['host']}:{db['port']}/{db['name']}")
 
     conn = await asyncpg.connect(
         host=db["host"],
@@ -28,9 +29,9 @@ async def init_database():
 
     try:
         await conn.execute(schema_sql)
-        print("✓ Таблиці створені успішно")
+        print("✓ Tables created successfully")
 
-        # Перевірка
+        # Verify
         tables = await conn.fetch(
             """
             SELECT tablename FROM pg_tables
@@ -38,10 +39,10 @@ async def init_database():
             ORDER BY tablename
             """
         )
-        print(f"✓ Таблиці в БД: {', '.join(t['tablename'] for t in tables)}")
+        print(f"✓ Tables in DB: {', '.join(t['tablename'] for t in tables)}")
 
     except Exception as e:
-        print(f"✗ Помилка: {e}")
+        print(f"✗ Error: {e}")
         raise
     finally:
         await conn.close()

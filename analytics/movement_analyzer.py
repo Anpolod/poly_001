@@ -3,7 +3,7 @@ analytics/movement_analyzer.py
 
 Data quality check and early signal detection from collected price_snapshots.
 
-For each market with >= 10 snapshots, computes:
+For each market with >= N snapshots, computes:
   - price_range:     max(mid_price) - min(mid_price) over collection window
   - volatility:      stddev(mid_price)
   - avg_spread:      mean spread across snapshots
@@ -15,17 +15,22 @@ Groups by sport, shows top 10 most volatile markets per sport.
 Flags markets where price_range > taker_rt_cost/100 as early GO candidates
 (price movement already exceeds round-trip cost).
 
-Output: console table + early_movers.csv
+Output: console table + CSV
 
 Usage:
     python -m analytics.movement_analyzer
+    python -m analytics.movement_analyzer --sport basketball
+    python -m analytics.movement_analyzer --from-date 2026-04-01 --to-date 2026-04-05
+    python -m analytics.movement_analyzer --min-snapshots 20 --output my_report.csv
     python analytics/movement_analyzer.py
 """
 
+import argparse
 import asyncio
 import csv
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import asyncpg
@@ -42,22 +47,19 @@ logger = logging.getLogger(__name__)
 
 SQL_MOVEMENTS = """
 WITH latest_cost AS (
-    -- Most recent taker_rt_cost per market (exclude bad pre-fix data)
     SELECT DISTINCT ON (market_id)
         market_id,
         taker_rt_cost,
         spread_pct
     FROM cost_analysis
-    WHERE taker_rt_cost < 50   -- filter out 198.0 artifacts from before fix
+    WHERE taker_rt_cost < 50
     ORDER BY market_id, scanned_at DESC
 ),
 estimated_cost AS (
-    -- Fallback: costs computed from latest snapshot for markets not in cost_analysis
     SELECT market_id, taker_rt_cost, spread_pct
     FROM cost_estimates
 ),
 effective_cost AS (
-    -- Prefer manual cost_analysis over computed estimates
     SELECT
         m.id AS market_id,
         COALESCE(lc.taker_rt_cost, ec.taker_rt_cost)   AS taker_rt_cost,
@@ -72,13 +74,14 @@ effective_cost AS (
     LEFT JOIN estimated_cost ec ON ec.market_id = m.id
 ),
 first_last AS (
-    -- First and last mid_price per market for direction
     SELECT DISTINCT ON (market_id)
         market_id,
         FIRST_VALUE(mid_price) OVER w AS first_mid,
         LAST_VALUE(mid_price)  OVER w AS last_mid
     FROM price_snapshots
     WHERE mid_price IS NOT NULL
+      AND ($1::timestamptz IS NULL OR ts >= $1)
+      AND ($2::timestamptz IS NULL OR ts <= $2)
     WINDOW w AS (PARTITION BY market_id ORDER BY ts
                  ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)
     ORDER BY market_id
@@ -101,8 +104,13 @@ stats AS (
     FROM price_snapshots ps
     JOIN markets m ON m.id = ps.market_id
     WHERE ps.mid_price IS NOT NULL
+      AND m.status != 'settled'
+      AND m.event_start > NOW() - INTERVAL '3 hours'
+      AND ($1::timestamptz IS NULL OR ps.ts >= $1)
+      AND ($2::timestamptz IS NULL OR ps.ts <= $2)
+      AND ($3::text IS NULL OR m.sport = $3)
     GROUP BY ps.market_id, m.sport, m.league, m.slug
-    HAVING COUNT(*) >= 10
+    HAVING COUNT(*) >= $4
 )
 SELECT
     s.market_id,
@@ -153,7 +161,18 @@ def _fmt_table(rows: list[dict], headers: list[str]) -> str:
     return "\n".join(lines)
 
 
-async def run(config: dict):
+def _parse_date(s: str) -> datetime:
+    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+
+
+async def run(
+    config: dict,
+    from_date: datetime | None = None,
+    to_date: datetime | None = None,
+    sport: str | None = None,
+    min_snapshots: int = 10,
+    output: str = "early_movers.csv",
+):
     db = config["database"]
     conn = await asyncpg.connect(
         host=db["host"], port=db["port"], database=db["name"],
@@ -161,7 +180,7 @@ async def run(config: dict):
     )
 
     logger.info("Querying price_snapshots…")
-    rows = await conn.fetch(SQL_MOVEMENTS)
+    rows = await conn.fetch(SQL_MOVEMENTS, from_date, to_date, sport, min_snapshots)
     await conn.close()
 
     if not rows:
@@ -217,7 +236,7 @@ async def run(config: dict):
     print(f"  Early GO candidates:   {len(early_go)} ({len(early_go)/total*100:.1f}% of analyzed)")
 
     # --- CSV output ---
-    out_path = Path("early_movers.csv")
+    out_path = Path(output)
     csv_cols = ["market_id", "sport", "league", "slug", "snapshots_count", "hours_covered",
                 "avg_mid", "price_range", "volatility", "avg_spread", "direction",
                 "taker_rt_cost", "move_cost_ratio", "cost_source", "early_go"]
@@ -230,13 +249,34 @@ async def run(config: dict):
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Movement analyzer — early GO candidates from price_snapshots"
+    )
+    parser.add_argument("--from-date", metavar="YYYY-MM-DD",
+                        help="Include snapshots on or after this date (UTC)")
+    parser.add_argument("--to-date", metavar="YYYY-MM-DD",
+                        help="Include snapshots on or before this date (UTC)")
+    parser.add_argument("--sport", metavar="SPORT",
+                        help="Filter to one sport (basketball, football, tennis, baseball, hockey)")
+    parser.add_argument("--min-snapshots", type=int, default=10, metavar="N",
+                        help="Minimum snapshots per market to include (default: 10)")
+    parser.add_argument("--output", default="early_movers.csv", metavar="FILE",
+                        help="CSV output path (default: early_movers.csv)")
+    args = parser.parse_args()
+
+    from_date = _parse_date(args.from_date) if args.from_date else None
+    to_date   = _parse_date(args.to_date)   if args.to_date   else None
+
     config_path = Path("config/settings.yaml")
     if not config_path.exists():
         print("ERROR: config/settings.yaml not found")
         sys.exit(1)
     with open(config_path) as f:
         config = yaml.safe_load(f)
-    asyncio.run(run(config))
+
+    asyncio.run(run(config, from_date=from_date, to_date=to_date,
+                    sport=args.sport, min_snapshots=args.min_snapshots,
+                    output=args.output))
 
 
 if __name__ == "__main__":

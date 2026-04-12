@@ -5,8 +5,32 @@ logs/
 __pycache__/
 *.pyc
 venv/
+.venv/
 .env
-phase0_results.csv
 *.egg-info/
 .vscode/
 .idea/
+.DS_Store
+
+# Phase 0 output files (regenerate with python cost_analyzer.py)
+phase0_results.csv
+phase0_clean_go.csv
+phase0_analysis.json
+phase0_report.md
+phase0_fixes_report.md
+
+# Analytics output CSVs (regenerate with CLI commands)
+bt_results.csv
+calibration.csv
+calibration_full.csv
+early_movers.csv
+spike_drift_report.csv
+
+# DB backups / inspection dumps (never commit these)
+*.sql
+*.dump
+*-inspect.json
+*_backup.*
+
+# Compiled KB raw conversation digests (privacy: contain raw conversation content)
+obsidian/_compiled/_raw/

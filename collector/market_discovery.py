@@ -1,11 +1,10 @@
-"""Пошук і фільтрація ринків для збору даних"""
+"""Market discovery and filtering for data collection."""
 
 import argparse
 import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 
 import yaml
 
@@ -59,6 +58,8 @@ _SLUG_PREFIX_MAP = [
 
 @dataclass
 class MarketInfo:
+    """Snapshot of a single market that has passed all liquidity filters."""
+
     market_id: str
     slug: str
     sport: str
@@ -88,29 +89,31 @@ def detect_sport(slug: str) -> str:
 
 
 class MarketDiscovery:
+    """Discovers and filters Polymarket sports markets using REST API data and configurable thresholds."""
+
     def __init__(self, rest_client: RestClient, config: dict):
         self.rest = rest_client
         self.config = config
 
     async def discover_all_sports_markets(self) -> list[dict]:
-        """Знайти всі активні спортивні ринки"""
+        """Fetch and parse all active sports markets with a future event_start."""
         events = await self.rest.get_sports_events()
         markets = []
         for event in events:
             parsed = self.rest.parse_event(event)
             markets.extend(parsed)
 
-        # Фільтр: тільки майбутні events
+        # Filter: keep only future events
         now = datetime.now(timezone.utc)
         markets = [m for m in markets if m["event_start"] > now]
 
         logger.info(
-            f"Всього спортивних ринків з майбутнім event_start: {len(markets)}"
+            f"Total sports markets with future event_start: {len(markets)}"
         )
         return markets
 
     def is_sports_market(self, market: dict) -> bool:
-        """Перевірити чи це справді спортивний ринок"""
+        """Return True if the market is a genuine sports market."""
         slug = (market.get("slug") or "").lower()
 
         # Blacklist
@@ -118,12 +121,12 @@ class MarketDiscovery:
             if pattern in slug:
                 return False
 
-        # Whitelist по лізі
+        # League whitelist
         league = (market.get("league") or "").lower()
         if league in SPORTS_LEAGUES:
             return True
 
-        # Whitelist по спорту
+        # Sport whitelist
         sport = (market.get("sport") or "").lower()
         if sport in SPORTS_KEYWORDS:
             return True
@@ -141,19 +144,19 @@ class MarketDiscovery:
         return False
 
     def filter_for_phase0(self, markets: list[dict]) -> list[dict]:
-        """Фільтр для Фази 0: мінімальний volume + sports whitelist"""
+        """Filter markets for Phase 0: minimum volume + sports whitelist."""
         min_vol = self.config["phase0"]["min_volume_24h"]
         filtered = [
             m for m in markets
             if m.get("volume_24h", 0) >= min_vol and self.is_sports_market(m)
         ]
         logger.info(
-            f"Після фільтру volume ≥ ${min_vol} + sports: {len(filtered)} ринків"
+            f"After volume ≥ ${min_vol} + sports filter: {len(filtered)} markets"
         )
         return filtered
 
     def filter_for_phase1(self, markets: list[dict], orderbooks: dict) -> list[dict]:
-        """Фільтр для Фази 1: volume + spread + depth"""
+        """Filter markets for Phase 1: volume + spread + depth thresholds."""
         cfg = self.config["phase1"]
         min_vol = cfg["min_volume_24h"]
         max_spread = cfg["max_spread"]
@@ -175,14 +178,14 @@ class MarketDiscovery:
             filtered.append(m)
 
         logger.info(
-            f"Після фільтру Phase1 (vol≥${min_vol}, spread≤{max_spread}, "
-            f"depth≥${min_depth}): {len(filtered)} ринків"
+            f"After Phase 1 filter (vol≥${min_vol}, spread≤{max_spread}, "
+            f"depth≥${min_depth}): {len(filtered)} markets"
         )
         return filtered
 
     def group_by_league(self, markets: list[dict]) -> dict[str, list[dict]]:
-        """Групувати ринки по лізі"""
-        groups = {}
+        """Group markets by sport/league key."""
+        groups: dict[str, list[dict]] = {}
         for m in markets:
             key = f"{m['sport']}/{m['league']}"
             groups.setdefault(key, []).append(m)
@@ -398,7 +401,7 @@ async def _run_dry_run(config_path: str) -> None:
             ])
 
         try:
-            from tabulate import tabulate  # type: ignore
+            from tabulate import tabulate
             print(tabulate(rows, headers=headers, tablefmt="simple"))
         except ImportError:
             # Plain fallback

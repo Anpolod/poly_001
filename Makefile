@@ -3,7 +3,11 @@ RUFF   := venv/bin/ruff
 MYPY   := venv/bin/mypy
 PYTEST := venv/bin/pytest
 
-.PHONY: lint format typecheck test fix all
+.PHONY: lint format typecheck test fix all dashboard obsidian scanner-once scanner-daemon tanking tanking-backtest
+
+## Start Streamlit dashboard (http://localhost:8501)
+dashboard:
+	venv/bin/streamlit run dashboard/main_dashboard.py --server.port 8501
 
 ## Run ruff linter (no changes)
 lint:

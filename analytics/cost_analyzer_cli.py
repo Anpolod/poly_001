@@ -179,7 +179,7 @@ def print_gate_decision(results: list[dict]) -> None:
     print(f"Markets with data: {data_count}")
     print(f"Clean GO markets (no flags): {clean_go_count}")
     print(f"Clean GO ratio: {clean_go_pct:.1f}%")
-    print(f"Gate threshold: 25% clean GO")
+    print("Gate threshold: 25% clean GO")
 
     if total == 0:
         print("Decision: INSUFFICIENT_DATA")

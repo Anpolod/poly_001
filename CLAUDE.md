@@ -1,5 +1,17 @@
 # CLAUDE.md
 
+## Session bootstrap (read first)
+
+When you start a new session in this project, do this **before** exploring the codebase:
+
+1. **Read** `obsidian/_compiled/index.md` — compiled knowledge from prior sessions
+2. **Read** `obsidian/INDEX.md` (if it exists) — full wiki catalog
+3. **Read** `obsidian/00_inbox/session-log.md` (if it exists) — cross-session activity log
+
+The compiled knowledge in `_compiled/` is auto-built from JSONL conversation logs. To refresh it: run `python scripts/compile_kb.py`, then say "compile" to me.
+
+---
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Setup
@@ -34,6 +46,16 @@ nohup python main.py > logs/stdout.log 2>&1 &
 ```
 
 There is no formal test runner. The files in `tests/` are exploratory scripts run directly with `python tests/<file>.py`.
+
+## Dashboard
+
+```bash
+# Start the Streamlit monitoring dashboard (http://localhost:8501)
+streamlit run dashboard/main_dashboard.py
+make dashboard
+
+# Pages: Overview | Markets | Movement Alerts | Cost Analysis | NBA Tanking | System Health
+```
 
 ## Analytics CLI
 

@@ -40,12 +40,13 @@ import asyncpg
 import yaml
 
 try:
-    from analytics.timing_analyzer import _classify, SPIKE_THRESHOLD_MULT, DRIFT_MIN_MINUTES
+    from analytics.timing_analyzer import DRIFT_MIN_MINUTES, SPIKE_THRESHOLD_MULT, _classify
 except ModuleNotFoundError:
     # Direct execution: analytics/spike_vs_drift_report.py
-    import sys, os
+    import os
+    import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-    from analytics.timing_analyzer import _classify, SPIKE_THRESHOLD_MULT, DRIFT_MIN_MINUTES
+    from analytics.timing_analyzer import DRIFT_MIN_MINUTES, SPIKE_THRESHOLD_MULT, _classify
 
 try:
     from tabulate import tabulate
@@ -80,6 +81,8 @@ SELECT
 FROM markets m
 JOIN price_snapshots ps ON ps.market_id = m.id
 WHERE ps.mid_price IS NOT NULL
+  AND m.status != 'settled'
+  AND m.event_start > NOW() - INTERVAL '3 hours'
 GROUP BY m.id, m.slug, m.sport, m.league
 HAVING COUNT(ps.ts) >= $1
 ORDER BY m.sport, snap_count DESC
@@ -293,18 +296,18 @@ def _print_market_table(markets: list[dict], sport: str, top_n: int = 10) -> Non
 # Main
 # ---------------------------------------------------------------------------
 
-async def run(config: dict):
+async def run(config: dict, min_snapshots: int = MIN_SNAPSHOTS, output: str = "spike_drift_report.csv"):
     db = config["database"]
     conn = await asyncpg.connect(
         host=db["host"], port=db["port"], database=db["name"],
         user=db["user"], password=db["password"],
     )
 
-    logger.info(f"Fetching markets with >= {MIN_SNAPSHOTS} snapshots…")
-    market_rows = await conn.fetch(SQL_MARKETS_WITH_SNAPSHOTS, MIN_SNAPSHOTS)
+    logger.info(f"Fetching markets with >= {min_snapshots} snapshots…")
+    market_rows = await conn.fetch(SQL_MARKETS_WITH_SNAPSHOTS, min_snapshots)
 
     if not market_rows:
-        print(f"No markets with >= {MIN_SNAPSHOTS} snapshots found.")
+        print(f"No markets with >= {min_snapshots} snapshots found.")
         await conn.close()
         return
 
@@ -331,13 +334,13 @@ async def run(config: dict):
 
     # --- Console output ---
     print(f"\n{'='*90}")
-    print(f"  SPIKE vs DRIFT REPORT — {total_markets} markets, MIN {MIN_SNAPSHOTS} snapshots")
+    print(f"  SPIKE vs DRIFT REPORT — {total_markets} markets, MIN {min_snapshots} snapshots")
     print(f"  Spike threshold: {SPIKE_THRESHOLD_MULT}× avg |speed|   |   "
           f"Drift min duration: {DRIFT_MIN_MINUTES:.0f}min   |   "
           f"Mean-reversion window: {MEAN_REVERSION_HOURS:.0f}h")
     print(f"{'='*90}")
 
-    print(f"\n── BY SPORT ──────────────────────────────────────────────────────────────────────")
+    print("\n── BY SPORT ──────────────────────────────────────────────────────────────────────")
     _print_sport_table(agg)
 
     for sport in sorted(agg.keys()):
@@ -347,7 +350,7 @@ async def run(config: dict):
 
     # --- Key finding ---
     print(f"\n{'='*90}")
-    print(f"  KEY FINDING")
+    print("  KEY FINDING")
     print(f"{'='*90}")
     print(f"  {global_spike_pct:.1f}% of markets are spike-driven across all sports")
     print(f"  ({all_verdicts.count('SPIKE_DRIVEN')} SPIKE_DRIVEN  |  "
@@ -364,17 +367,17 @@ async def run(config: dict):
         )
         if nba_fb_spike_pct > KILL_SPIKE_PCT:
             print(f"\n  {'!'*86}")
-            print(f"  WARNING: market structure is spike-dominated.")
+            print("  WARNING: market structure is spike-dominated.")
             print(f"  {nba_fb_spike_pct:.1f}% of NBA + football markets are SPIKE_DRIVEN "
                   f"(threshold: {KILL_SPIKE_PCT:.0f}%).")
-            print(f"  Taker directional strategy requires news advantage, not pattern.")
+            print("  Taker directional strategy requires news advantage, not pattern.")
             print(f"  {'!'*86}")
         else:
             print(f"\n  NBA + football spike-driven: {nba_fb_spike_pct:.1f}% "
                   f"(kill threshold: {KILL_SPIKE_PCT:.0f}% — OK)")
 
     # --- CSV ---
-    out_path = Path("spike_drift_report.csv")
+    out_path = Path(output)
     csv_cols = ["market_id", "slug", "sport", "league", "snap_count",
                 "total_move_abs", "spike_move", "drift_move",
                 "spike_pct", "drift_pct", "n_spikes", "largest_spike",
@@ -389,13 +392,24 @@ async def run(config: dict):
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Spike vs Drift report — classify markets by price movement type"
+    )
+    parser.add_argument("--min-snapshots", type=int, default=MIN_SNAPSHOTS, metavar="N",
+                        help=f"Minimum snapshots per market (default: {MIN_SNAPSHOTS})")
+    parser.add_argument("--output", default="spike_drift_report.csv", metavar="FILE",
+                        help="CSV output path (default: spike_drift_report.csv)")
+    args = parser.parse_args()
+
     config_path = Path("config/settings.yaml")
     if not config_path.exists():
         print("ERROR: config/settings.yaml not found")
         sys.exit(1)
     with open(config_path) as f:
         config = yaml.safe_load(f)
-    asyncio.run(run(config))
+
+    asyncio.run(run(config, min_snapshots=args.min_snapshots, output=args.output))
 
 
 if __name__ == "__main__":

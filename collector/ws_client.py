@@ -1,18 +1,16 @@
-"""WebSocket клієнт для збору даних в реальному часі (Фаза 1)"""
+"""WebSocket client for real-time data collection (Phase 1)"""
 
 import asyncio
 import json
 import logging
-import websockets
 from datetime import datetime, timezone
-from typing import Optional, Callable
+from typing import Callable, Optional
+
+import websockets
 
 from collector.spike_tracker import SpikeTracker
 
 logger = logging.getLogger(__name__)
-
-# How long WS must be silent before falling back to REST (seconds)
-_WS_SILENCE_THRESHOLD = 60.0
 
 # Flush buffer when it reaches this many items
 _BUFFER_FLUSH_SIZE = 10
@@ -20,31 +18,31 @@ _BUFFER_FLUSH_SIZE = 10
 # Flush buffer at least every this many seconds
 _BUFFER_FLUSH_INTERVAL = 30.0
 
-# Log heartbeat every this many seconds
-_HEARTBEAT_INTERVAL = 60.0
-
-# Downtime threshold in seconds before on_gap is called (5 minutes)
-_GAP_THRESHOLD_SECONDS = 300.0
-
 
 class WsClient:
+    """WebSocket client for real-time Polymarket market data with exponential-backoff reconnection."""
+
     def __init__(
         self,
         config: dict,
         on_trade: Optional[Callable] = None,
         on_gap: Optional[Callable] = None,
         on_spike: Optional[Callable] = None,
+        on_reconnect: Optional[Callable] = None,
     ):
+        coll = config["collector"]
         self.ws_url = config["api"]["ws_url"]
-        self.base_delay = config["collector"]["ws_reconnect_base_delay"]
-        self.max_delay = config["collector"]["ws_reconnect_max_delay"]
-        self.backoff = config["collector"]["ws_reconnect_backoff"]
+        self.base_delay = coll["ws_reconnect_base_delay"]
+        self.max_delay = coll["ws_reconnect_max_delay"]
+        self.backoff = coll["ws_reconnect_backoff"]
+        self._silence_threshold: float = float(coll.get("ws_silence_threshold_sec", 60.0))
+        self._heartbeat_interval: float = float(coll.get("heartbeat_interval", 60.0))
+        self._gap_threshold_sec: float = float(coll.get("gap_threshold_minutes", 5)) * 60.0
         self.on_trade = on_trade
-        self.on_gap = on_gap    # optional callable(downtime_seconds: float)
-        self.on_spike = on_spike  # optional callable(spike_event: dict)
-        self._spike_detection: bool = config.get("collector", {}).get(
-            "spike_detection_realtime", False
-        )
+        self.on_gap = on_gap          # optional callable(downtime_seconds: float)
+        self.on_spike = on_spike      # optional callable(spike_event: dict)
+        self.on_reconnect = on_reconnect  # optional callable(attempt: int, delay: float)
+        self._spike_detection: bool = coll.get("spike_detection_realtime", False)
         self._ws = None
         self._subscribed_markets: dict[str, dict] = {}  # token_id -> market info
         self._spike_trackers: dict[str, SpikeTracker] = {}  # market_id -> tracker
@@ -64,12 +62,15 @@ class WsClient:
         # Track when a connection was lost to compute downtime
         self._disconnect_ts: Optional[float] = None
 
+        # Consecutive reconnect attempt counter (reset to 0 on successful connect)
+        self._reconnect_attempt: int = 0
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     def add_market(self, token_id: str, market_id: str, side: str = "yes"):
-        """Додати ринок для підписки"""
+        """Register a market for WebSocket subscription."""
         self._subscribed_markets[token_id] = {
             "market_id": market_id,
             "side": side,
@@ -78,7 +79,7 @@ class WsClient:
             self._spike_trackers[market_id] = SpikeTracker(market_id)
 
     def remove_market(self, token_id: str):
-        """Прибрати ринок з підписки"""
+        """Unsubscribe and remove a market."""
         info = self._subscribed_markets.pop(token_id, None)
         if info:
             self._spike_trackers.pop(info["market_id"], None)
@@ -94,7 +95,7 @@ class WsClient:
         self._flush_callback = fn
 
     async def start(self):
-        """Запустити WebSocket збір"""
+        """Start the WebSocket data collection loop with exponential backoff reconnection."""
         self._running = True
         self._last_flush_ts = asyncio.get_event_loop().time()
         delay = self.base_delay
@@ -109,9 +110,9 @@ class WsClient:
                 # If we had a prior disconnect, compute downtime
                 if self._disconnect_ts is not None:
                     downtime = connect_ts - self._disconnect_ts
-                    if downtime > _GAP_THRESHOLD_SECONDS:
+                    if downtime > self._gap_threshold_sec:
                         logger.warning(
-                            f"WS reconnect after {downtime:.0f}s downtime (gap > {_GAP_THRESHOLD_SECONDS:.0f}s)"
+                            f"WS reconnect after {downtime:.0f}s downtime (gap > {self._gap_threshold_sec:.0f}s)"
                         )
                         if self.on_gap is not None:
                             try:
@@ -130,10 +131,11 @@ class WsClient:
                 ) as ws:
                     self._ws = ws
                     delay = self.base_delay  # reset delay on success
+                    self._reconnect_attempt = 0
                     self._last_message_ts = asyncio.get_event_loop().time()
-                    logger.info("WebSocket підключено")
+                    logger.info("WebSocket connected")
 
-                    # Підписатись на всі активні ринки
+                    # Subscribe to all active markets
                     if self._subscribed_markets:
                         await self._subscribe(ws)
 
@@ -141,9 +143,9 @@ class WsClient:
                         await self._handle_message(msg)
 
             except websockets.exceptions.ConnectionClosed as e:
-                logger.warning(f"WS закрито: {e}")
+                logger.warning(f"WS closed: {e}")
             except (ConnectionError, OSError, asyncio.TimeoutError) as e:
-                logger.warning(f"WS помилка: {e}")
+                logger.warning(f"WS error: {e}")
             except Exception as e:
                 logger.error(f"WS unexpected: {e}")
 
@@ -152,7 +154,15 @@ class WsClient:
             self._ws = None
 
             if self._running:
-                logger.info(f"Reconnect через {delay}s")
+                self._reconnect_attempt += 1
+                logger.info(f"Reconnecting in {delay}s")
+                if self.on_reconnect is not None:
+                    try:
+                        result = self.on_reconnect(self._reconnect_attempt, delay)
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception as rc_err:
+                        logger.error(f"on_reconnect callback error: {rc_err}")
                 await asyncio.sleep(delay)
                 delay = min(delay * self.backoff, self.max_delay)
 
@@ -200,11 +210,11 @@ class WsClient:
         now = asyncio.get_event_loop().time()
         if self._last_message_ts is not None:
             silence = now - self._last_message_ts
-            if silence < _WS_SILENCE_THRESHOLD:
+            if silence < self._silence_threshold:
                 return  # WS is still active
 
         logger.warning(
-            f"WS silent for >{_WS_SILENCE_THRESHOLD}s — falling back to REST polling"
+            f"WS silent for >{self._silence_threshold:.0f}s — falling back to REST polling"
         )
 
         for token_id in list(self._subscribed_markets.keys()):
@@ -269,11 +279,11 @@ class WsClient:
     async def _heartbeat(self):
         """
         Background coroutine that logs a liveness message every
-        _HEARTBEAT_INTERVAL seconds, including the total number of WS messages
+        heartbeat_interval seconds, including the total number of WS messages
         received since the client was started.
         """
         while self._running:
-            await asyncio.sleep(_HEARTBEAT_INTERVAL)
+            await asyncio.sleep(self._heartbeat_interval)
             logger.info(f"WS alive: {self._snapshot_count} messages received")
 
     # ------------------------------------------------------------------
@@ -281,22 +291,22 @@ class WsClient:
     # ------------------------------------------------------------------
 
     async def _subscribe(self, ws):
-        """Підписатись на market updates"""
+        """Send a subscription request for all active markets."""
         token_ids = list(self._subscribed_markets.keys())
         if not token_ids:
             return
 
-        # Polymarket WS підписка
+        # Polymarket WS subscription message
         sub_msg = {
             "type": "subscribe",
             "channel": "market",
             "assets_ids": token_ids,
         }
         await ws.send(json.dumps(sub_msg))
-        logger.info(f"Підписка на {len(token_ids)} токенів")
+        logger.info(f"Subscribed to {len(token_ids)} tokens")
 
     async def _handle_message(self, raw_msg: str):
-        """Обробити повідомлення з WebSocket"""
+        """Parse and dispatch an incoming WebSocket message."""
         # Update liveness tracking
         self._last_message_ts = asyncio.get_event_loop().time()
         self._snapshot_count += 1
@@ -315,7 +325,7 @@ class WsClient:
         if msg_type == "trade":
             await self._handle_trade(data)
         elif msg_type == "book":
-            pass  # orderbook updates — можна додати пізніше
+            pass  # orderbook updates — can be added later
         elif msg_type == "price_change":
             pass
         elif "price_changes" in data:
@@ -324,7 +334,7 @@ class WsClient:
                 await self._handle_trade(change)
 
     async def _handle_trade(self, data: dict):
-        """Обробити trade event"""
+        """Process a single trade event and invoke the on_trade callback."""
         asset_id = data.get("asset_id", "")
         market_info = self._subscribed_markets.get(asset_id)
 

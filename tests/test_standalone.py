@@ -1,9 +1,10 @@
-"""Standalone тести — без зовнішніх залежностей"""
+"""Standalone tests — pure cost math, no external dependencies"""
 
 import sys
 from pathlib import Path
 
-# Тестуємо чисту логіку без імпортів з collector
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 
 def compute_spread_pct(best_bid, best_ask):
     if not best_bid or not best_ask or best_bid <= 0:
@@ -41,129 +42,71 @@ def compute_verdict(ratio, go_threshold, marginal_threshold):
     return "NO_GO"
 
 
-# === ТЕСТИ ===
+# === TESTS ===
 
 def test_spread_pct():
-    # bid=0.47, ask=0.49, mid=0.48, spread=0.02
-    # spread_pct = 0.02/0.48 * 100 = 4.1667%
     result = compute_spread_pct(0.47, 0.49)
-    assert abs(result - 4.1667) < 0.01, f"Expected ~4.17, got {result}"
-    print(f"✓ spread_pct: {result}%")
+    assert abs(result - 4.1667) < 0.01
+
 
 def test_spread_pct_tight():
-    # bid=0.50, ask=0.51, spread=0.01
     result = compute_spread_pct(0.50, 0.51)
-    assert abs(result - 1.9802) < 0.01, f"Expected ~1.98, got {result}"
-    print(f"✓ spread_pct tight: {result}%")
+    assert abs(result - 1.9802) < 0.01
+
 
 def test_taker_round_trip():
-    # fee=0.75%, spread_pct=4.17%, slippage=0.5%
     cost = compute_taker_round_trip(0.0075, 4.17, 0.5)
-    # = 1.5 + 4.17 + 0.5 = 6.17%
-    assert abs(cost - 6.17) < 0.01, f"Expected ~6.17, got {cost}"
-    print(f"✓ taker round-trip: {cost}%")
+    assert abs(cost - 6.17) < 0.01
+
 
 def test_taker_tight_spread():
-    # fee=0.75%, spread_pct=1.98%, slippage=0.5%
     cost = compute_taker_round_trip(0.0075, 1.98, 0.5)
-    # = 1.5 + 1.98 + 0.5 = 3.98%
-    assert abs(cost - 3.98) < 0.01, f"Expected ~3.98, got {cost}"
-    print(f"✓ taker round-trip tight: {cost}%")
+    assert abs(cost - 3.98) < 0.01
+
 
 def test_maker_round_trip():
-    # spread=4.17%, AS_mult=1.5, fee=0.75%, rebate=25%
     cost = compute_maker_round_trip(4.17, 1.5, 0.0075, 25)
-    # AS = 6.255, rebate = 0.75*0.25 = 0.1875
-    # cost = 6.255 - 0.1875 = 6.0675
     expected = 4.17 * 1.5 - 0.0075 * 100 * 0.25
-    assert abs(cost - expected) < 0.01, f"Expected ~{expected}, got {cost}"
-    print(f"✓ maker round-trip: {cost}%")
+    assert abs(cost - expected) < 0.01
+
 
 def test_ratio_go():
-    # move=0.05 (5¢), mid=0.50, cost=4%
-    # move_pct = 10%, ratio = 10/4 = 2.5
     ratio = compute_ratio(0.05, 0.50, 4.0)
-    assert abs(ratio - 2.5) < 0.01, f"Expected 2.5, got {ratio}"
-    verdict = compute_verdict(ratio, 2.0, 1.5)
-    assert verdict == "GO"
-    print(f"✓ ratio {ratio} → {verdict}")
+    assert abs(ratio - 2.5) < 0.01
+    assert compute_verdict(ratio, 2.0, 1.5) == "GO"
+
 
 def test_ratio_marginal():
-    # move=0.03 (3¢), mid=0.50, cost=4%
-    # move_pct = 6%, ratio = 6/4 = 1.5
     ratio = compute_ratio(0.03, 0.50, 4.0)
-    assert abs(ratio - 1.5) < 0.01, f"Expected 1.5, got {ratio}"
-    verdict = compute_verdict(ratio, 2.0, 1.5)
-    assert verdict == "MARGINAL"
-    print(f"✓ ratio {ratio} → {verdict}")
+    assert abs(ratio - 1.5) < 0.01
+    assert compute_verdict(ratio, 2.0, 1.5) == "MARGINAL"
+
 
 def test_ratio_no_go():
-    # move=0.02 (2¢), mid=0.50, cost=5%
-    # move_pct = 4%, ratio = 4/5 = 0.8
     ratio = compute_ratio(0.02, 0.50, 5.0)
-    assert abs(ratio - 0.8) < 0.01, f"Expected 0.8, got {ratio}"
-    verdict = compute_verdict(ratio, 2.0, 1.5)
-    assert verdict == "NO_GO"
-    print(f"✓ ratio {ratio} → {verdict}")
+    assert abs(ratio - 0.8) < 0.01
+    assert compute_verdict(ratio, 2.0, 1.5) == "NO_GO"
+
 
 def test_ratio_no_data():
     ratio = compute_ratio(None, 0.50, 5.0)
-    verdict = compute_verdict(ratio, 2.0, 1.5)
-    assert verdict == "NO_DATA"
-    print(f"✓ no data → {verdict}")
+    assert compute_verdict(ratio, 2.0, 1.5) == "NO_DATA"
+
 
 def test_real_scenario_nba():
-    """Реалістичний сценарій: NBA moneyline, ліквідний ринок"""
+    """Realistic NBA moneyline liquid market — 4¢ move over 24h"""
     bid, ask = 0.62, 0.64
-    spread_pct = compute_spread_pct(bid, ask)  # ~3.17%
+    spread_pct = compute_spread_pct(bid, ask)
     taker_cost = compute_taker_round_trip(0.0075, spread_pct, 0.5)
-    
-    # Якщо ціна рухнулась на 4¢ за 24 години
-    move_24h = 0.04
-    mid = (bid + ask) / 2
-    ratio = compute_ratio(move_24h, mid, taker_cost)
+    ratio = compute_ratio(0.04, (bid + ask) / 2, taker_cost)
     verdict = compute_verdict(ratio, 2.0, 1.5)
-    
-    print(f"\n  NBA scenario: bid={bid} ask={ask}")
-    print(f"  spread={spread_pct:.2f}%, taker_cost={taker_cost:.2f}%")
-    print(f"  move_24h={move_24h}, ratio={ratio}, verdict={verdict}")
-    print(f"✓ NBA scenario passed")
+    assert verdict in ("GO", "MARGINAL", "NO_GO")
 
-def test_real_scenario_thin():
-    """Тонкий ринок: великий спред"""
+
+def test_real_scenario_thin_market():
+    """Thin market with large spread must be rejected"""
     bid, ask = 0.35, 0.42
-    spread_pct = compute_spread_pct(bid, ask)  # ~18.18%
+    spread_pct = compute_spread_pct(bid, ask)
     taker_cost = compute_taker_round_trip(0.0075, spread_pct, 1.0)
-    
-    move_24h = 0.05
-    mid = (bid + ask) / 2
-    ratio = compute_ratio(move_24h, mid, taker_cost)
-    verdict = compute_verdict(ratio, 2.0, 1.5)
-    
-    print(f"\n  Thin market: bid={bid} ask={ask}")
-    print(f"  spread={spread_pct:.2f}%, taker_cost={taker_cost:.2f}%")
-    print(f"  move_24h={move_24h}, ratio={ratio}, verdict={verdict}")
-    assert verdict == "NO_GO", f"Thin market should be NO_GO, got {verdict}"
-    print(f"✓ Thin market correctly rejected")
-
-
-if __name__ == "__main__":
-    print("=" * 50)
-    print("  ТЕСТИ COST ANALYZER")
-    print("=" * 50)
-    
-    test_spread_pct()
-    test_spread_pct_tight()
-    test_taker_round_trip()
-    test_taker_tight_spread()
-    test_maker_round_trip()
-    test_ratio_go()
-    test_ratio_marginal()
-    test_ratio_no_go()
-    test_ratio_no_data()
-    test_real_scenario_nba()
-    test_real_scenario_thin()
-    
-    print("\n" + "=" * 50)
-    print("  ✓ ВСІ 11 ТЕСТІВ ПРОЙШЛИ")
-    print("=" * 50)
+    ratio = compute_ratio(0.05, (bid + ask) / 2, taker_cost)
+    assert compute_verdict(ratio, 2.0, 1.5) == "NO_GO"

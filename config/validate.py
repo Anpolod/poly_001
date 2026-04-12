@@ -8,9 +8,8 @@ Raises SystemExit with a clear message on the first missing or wrong-type key.
 import sys
 from typing import Any
 
-
 # (dotted_key, expected_type, description)
-_REQUIRED: list[tuple[str, type, str]] = [
+_REQUIRED: list[tuple[str, Any, str]] = [
     ("database.host",                          str,   "DB hostname"),
     ("database.port",                          int,   "DB port"),
     ("database.name",                          str,   "DB name"),

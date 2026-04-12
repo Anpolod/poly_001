@@ -1,55 +1,50 @@
-"""Тести для analytics/cost_analyzer.py"""
+"""Tests for analytics/cost_analyzer.py"""
 
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from analytics.cost_analyzer import (
-    compute_taker_round_trip,
+    analyze_market,
     compute_maker_round_trip,
     compute_ratio,
+    compute_taker_round_trip,
     compute_verdict,
-    analyze_market,
 )
 
 
 def test_taker_round_trip():
-    # fee=0.75%, spread=3%, slippage=0.5%
+    # fee=0.75%, spread=3%, slippage=0.5% → 1.5 + 3 + 0.5 = 5.0
     cost = compute_taker_round_trip(0.0075, 3.0, 0.5)
-    assert abs(cost - 5.0) < 0.01, f"Expected ~5.0, got {cost}"
-    print(f"✓ taker_round_trip: {cost}%")
+    assert abs(cost - 5.0) < 0.01
 
 
 def test_maker_round_trip():
     # spread=3%, AS_mult=1.5, fee=0.75%, rebate=25%
+    # AS = 4.5, rebate = 0.1875 → 4.3125
     cost = compute_maker_round_trip(3.0, 1.5, 0.0075, 25)
-    # AS = 3.0 * 1.5 = 4.5, rebate = 0.75 * 0.25 = 0.1875
-    expected = 4.5 - 0.1875
-    assert abs(cost - expected) < 0.01, f"Expected ~{expected}, got {cost}"
-    print(f"✓ maker_round_trip: {cost}%")
+    expected = 3.0 * 1.5 - 0.0075 * 100 * 0.25
+    assert abs(cost - expected) < 0.01
 
 
 def test_ratio():
-    # move=0.03 (3¢), mid=0.50, cost=5%
+    # move=0.03, mid=0.50 → move_pct=6%, cost=5% → ratio=1.2
     ratio = compute_ratio(0.03, 0.50, 5.0)
-    # move_pct = 6%, ratio = 6/5 = 1.2
-    assert abs(ratio - 1.2) < 0.01, f"Expected 1.2, got {ratio}"
-    print(f"✓ ratio: {ratio}")
+    assert abs(ratio - 1.2) < 0.01
 
 
-def test_ratio_none():
+def test_ratio_none_inputs():
     assert compute_ratio(None, 0.50, 5.0) is None
     assert compute_ratio(0.03, None, 5.0) is None
     assert compute_ratio(0.03, 0.50, 0) is None
-    print("✓ ratio None cases")
 
 
-def test_verdict():
+def test_verdict_all_cases():
     assert compute_verdict(2.5, 2.0, 1.5) == "GO"
     assert compute_verdict(1.7, 2.0, 1.5) == "MARGINAL"
     assert compute_verdict(1.0, 2.0, 1.5) == "NO_GO"
     assert compute_verdict(None, 2.0, 1.5) == "NO_DATA"
-    print("✓ verdicts: GO, MARGINAL, NO_GO, NO_DATA")
 
 
 def test_analyze_market():
@@ -86,15 +81,3 @@ def test_analyze_market():
     assert result["taker_rt_cost"] > 0
     assert result["maker_rt_cost"] > 0
     assert result["verdict"] in ("GO", "MARGINAL", "NO_GO", "NO_DATA")
-    print(f"✓ analyze_market: taker_cost={result['taker_rt_cost']}%, "
-          f"maker_cost={result['maker_rt_cost']}%, verdict={result['verdict']}")
-
-
-if __name__ == "__main__":
-    test_taker_round_trip()
-    test_maker_round_trip()
-    test_ratio()
-    test_ratio_none()
-    test_verdict()
-    test_analyze_market()
-    print("\n✓ Всі тести пройшли")

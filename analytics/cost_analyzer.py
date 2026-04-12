@@ -1,9 +1,9 @@
-"""Аналітика Фази 0 — розрахунок costs і verdict"""
+"""Phase 0 analytics — cost calculation and verdict assignment."""
 
 import logging
 from typing import Optional
 
-from collector.normalizer import compute_spread_pct, compute_price_move
+from collector.normalizer import compute_price_move, compute_spread_pct
 
 logger = logging.getLogger(__name__)
 
@@ -11,21 +11,21 @@ logger = logging.getLogger(__name__)
 def compute_taker_round_trip(
     fee_rate: float, spread_pct: float, est_slippage_pct: float
 ) -> float:
-    """Round-trip cost як taker у %"""
+    """Round-trip cost as taker in %."""
     return (fee_rate * 100 * 2) + spread_pct + est_slippage_pct
 
 
 def compute_maker_round_trip(
     spread_pct: float, adverse_selection_mult: float, fee_rate: float, rebate_pct: float
 ) -> float:
-    """Round-trip cost як maker у %"""
+    """Round-trip cost as maker in %."""
     adverse_selection = spread_pct * adverse_selection_mult
     rebate = fee_rate * 100 * (rebate_pct / 100)
     return adverse_selection - rebate
 
 
 def compute_ratio(move: Optional[float], mid_price: Optional[float], cost_pct: float) -> Optional[float]:
-    """Ratio move/cost"""
+    """Compute move/cost ratio."""
     if move is None or mid_price is None or mid_price <= 0 or cost_pct <= 0:
         return None
     move_pct = (move / mid_price) * 100
@@ -33,7 +33,7 @@ def compute_ratio(move: Optional[float], mid_price: Optional[float], cost_pct: f
 
 
 def compute_verdict(ratio: Optional[float], go_threshold: float, marginal_threshold: float) -> str:
-    """GO / MARGINAL / NO_GO"""
+    """Return GO / MARGINAL / NO_GO verdict based on ratio thresholds."""
     if ratio is None:
         return "NO_DATA"
     if ratio >= go_threshold:
@@ -50,7 +50,7 @@ def analyze_market(
     price_history: Optional[list],
     config: dict,
 ) -> dict:
-    """Повний аналіз одного ринку для Фази 0"""
+    """Run a full Phase 0 analysis for a single market and return a result dict."""
     cfg = config["phase0"]
 
     best_bid = orderbook.get("best_bid", 0)
@@ -113,7 +113,7 @@ def analyze_market(
 
 
 def aggregate_by_league(results: list[dict]) -> list[dict]:
-    """Агрегація результатів по лігах"""
+    """Aggregate Phase 0 results by league, returning summary stats per league."""
     groups: dict[str, list[dict]] = {}
     for r in results:
         key = f"{r['sport']}/{r['league']}"

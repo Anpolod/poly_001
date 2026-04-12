@@ -56,7 +56,24 @@
       "Bash(git commit -m ':*)",
       "Bash(git push:*)",
       "Read(//Users/andriipolodiienko/Documents/dev/projects/**)",
-      "Bash(git init:*)"
+      "Bash(git init:*)",
+      "Bash(venv/bin/python3 -c ':*)",
+      "Bash(venv/bin/python3 -c \"from collector.rest_client import RestClient; from collector.market_discovery import MarketDiscovery; print\\('OK'\\)\")",
+      "Bash(jobs)",
+      "Read(//proc/56544/**)",
+      "Bash(ps -p 56684 -o pid,etime,command)",
+      "Bash(venv/bin/python tests/test_cost_analyzer.py)",
+      "Bash(venv/bin/python tests/test_standalone.py)",
+      "Bash(venv/bin/pytest -v)",
+      "Bash(venv/bin/python -c \"import aioresponses; print\\('ok'\\)\")",
+      "Bash(venv/bin/pytest tests/test_collector.py -v --tb=short)",
+      "Bash(venv/bin/pip show:*)",
+      "Bash(venv/bin/pytest tests/test_collector.py::TestGetOrderbook -v --tb=short)",
+      "Bash(venv/bin/pytest tests/test_repository.py -v --tb=short)",
+      "Bash(venv/bin/pytest -v --tb=short)",
+      "Bash(venv/bin/python -m analytics.backtester --min-snapshots 100 --output bt_results.csv)",
+      "Bash(venv/bin/python -m analytics.calibration_analyzer --output calibration.csv)",
+      "Bash(git commit:*)"
     ],
     "additionalDirectories": [
       "/Users/andriipolodiienko/Documents/dev/projects/polymarket-sports/.claude/skills"
