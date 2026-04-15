@@ -19,7 +19,6 @@ import asyncio
 import json
 import logging
 import sys
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -37,6 +36,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ALIASES_PATH = _PROJECT_ROOT / "config" / "nba_team_aliases.yaml"
 _FALLBACK_STANDINGS_PATH = _PROJECT_ROOT / "config" / "nba_standings.yaml"
 _ESPN_STANDINGS_URL = "https://site.api.espn.com/apis/v2/sports/basketball/nba/standings"
+_ESPN_SCHEDULE_URL  = "https://site.api.espn.com/apis/v2/sports/basketball/nba/scoreboard"
 _ROTOWIRE_URL = "https://www.rotowire.com/basketball/nba-lineups.php"
 _WATCH_INTERVAL_SEC = 1800  # 30 min
 
@@ -68,8 +68,9 @@ class TankingSignal:
     current_price: float                   # YES price for motivated team
     price_24h_ago: Optional[float]
     actual_drift: Optional[float]          # current_price - price_24h_ago
-    pattern_strength: str                  # "HIGH" / "MODERATE"
+    pattern_strength: str                  # "HIGH" / "MODERATE" / "WATCH"
     recommended_action: str                # "BUY" / "SELL / CLOSE" / "WATCH"
+    is_back_to_back: bool = False          # motivated team played yesterday
     lineup_notes: list[str] = field(default_factory=list)
 
 
@@ -230,6 +231,92 @@ async def get_standings(session: aiohttp.ClientSession) -> dict[str, TeamStandin
         raw = load_standings_from_fallback()
 
     return build_standings(raw)
+
+
+# ---------------------------------------------------------------------------
+# Back-to-Back Detection
+# ---------------------------------------------------------------------------
+
+
+async def fetch_teams_playing_on(
+    session: aiohttp.ClientSession,
+    date: datetime,
+) -> set[str]:
+    """Return set of team abbreviations (uppercase) that played on `date` (UTC)."""
+    date_str = date.strftime("%Y%m%d")
+    try:
+        async with session.get(
+            _ESPN_SCHEDULE_URL,
+            params={"dates": date_str},
+            timeout=aiohttp.ClientTimeout(total=10),
+            headers={"User-Agent": "Mozilla/5.0"},
+        ) as r:
+            r.raise_for_status()
+            data = await r.json(content_type=None)
+    except Exception as exc:
+        logger.warning(f"ESPN schedule fetch failed for {date_str}: {exc}")
+        return set()
+
+    teams: set[str] = set()
+    for event in data.get("events", []):
+        for competition in event.get("competitions", []):
+            for competitor in competition.get("competitors", []):
+                abbr = competitor.get("team", {}).get("abbreviation", "")
+                if abbr:
+                    teams.add(abbr.upper())
+    return teams
+
+
+async def build_b2b_map(
+    signals: list[TankingSignal],
+    session: aiohttp.ClientSession,
+) -> dict[str, set[str]]:
+    """Fetch yesterday's schedule for each unique game date among signals.
+
+    Returns {date_str: set_of_abbrs_that_played_the_day_before}.
+    """
+    unique_dates = {s.game_start.date() for s in signals}
+    result: dict[str, set[str]] = {}
+    for game_date in unique_dates:
+        prev_day = datetime(game_date.year, game_date.month, game_date.day,
+                            tzinfo=timezone.utc) - timedelta(days=1)
+        played = await fetch_teams_playing_on(session, prev_day)
+        result[game_date.isoformat()] = played
+        if played:
+            logger.info(f"B2B: {len(played)} teams played on {prev_day.date()} "
+                        f"(day before {game_date})")
+    return result
+
+
+def apply_b2b_filter(
+    signals: list[TankingSignal],
+    standings: dict[str, "TeamStanding"],
+    b2b_map: dict[str, set[str]],
+) -> None:
+    """Mutates signals in-place: downgrades strength if motivated team is on B2B.
+
+    HIGH   → MODERATE  (still worth watching, but fatigue is a real risk)
+    MODERATE → WATCH   (too risky — tired team may not try even if motivated)
+    """
+    _downgrade = {"HIGH": "MODERATE", "MODERATE": "WATCH", "WATCH": "WATCH"}
+
+    for s in signals:
+        played_yesterday = b2b_map.get(s.game_start.date().isoformat(), set())
+        if not played_yesterday:
+            continue
+
+        motivated = standings.get(s.motivated_team)
+        if motivated and motivated.abbreviation.upper() in played_yesterday:
+            s.is_back_to_back = True
+            old_strength = s.pattern_strength
+            s.pattern_strength = _downgrade[s.pattern_strength]
+            # Recalculate action with new strength
+            s.recommended_action = _recommended_action(
+                s.pattern_strength, s.current_price, s.hours_to_game
+            )
+            logger.info(
+                f"B2B downgrade: {s.motivated_team} — {old_strength} → {s.pattern_strength}"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -428,6 +515,7 @@ def print_signals(signals: list[TankingSignal], title: str = "") -> None:
     for s in signals:
         drift_str = f"{s.actual_drift:+.3f}" if s.actual_drift is not None else "—"
         p24_str = f"{s.price_24h_ago:.3f}" if s.price_24h_ago is not None else "—"
+        b2b_flag = "⚠ B2B" if s.is_back_to_back else ""
         rows.append([
             s.pattern_strength,
             s.recommended_action,
@@ -439,11 +527,12 @@ def print_signals(signals: list[TankingSignal], title: str = "") -> None:
             drift_str,
             f"{s.hours_to_game:.1f}h",
             s.game_start.strftime("%m-%d %H:%M"),
+            b2b_flag,
         ])
 
     headers = [
         "Strength", "Action", "Motivated Team", "Tanking Team",
-        "Diff", "Price", "24h ago", "Drift", "Game in", "Start"
+        "Diff", "Price", "24h ago", "Drift", "Game in", "Start", "B2B",
     ]
     print("\n" + tabulate(rows, headers=headers, tablefmt="simple") + "\n")
     print("=" * width)
@@ -725,7 +814,6 @@ async def run(
             return
 
         aliases = load_aliases()
-        first_run = True
 
         async with aiohttp.ClientSession() as session:
             while True:
@@ -733,6 +821,16 @@ async def run(
                 signals = await scan_tanking_patterns(
                     pool, standings, aliases, min_differential, hours
                 )
+
+                # Back-to-back filter — downgrade strength if motivated team played yesterday
+                if signals:
+                    b2b_map = await build_b2b_map(signals, session)
+                    apply_b2b_filter(signals, standings, b2b_map)
+                    # Re-sort after potential strength changes
+                    signals.sort(key=lambda s: (
+                        -{"HIGH": 2, "MODERATE": 1, "WATCH": 0}[s.pattern_strength],
+                        -s.motivation_differential,
+                    ))
 
                 # Enrich with Rotowire lineup news for HIGH signals only
                 high_signals = [s for s in signals if s.pattern_strength == "HIGH"]
