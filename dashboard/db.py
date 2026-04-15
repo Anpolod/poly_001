@@ -217,6 +217,22 @@ def data_gaps_recent(limit: int = 50) -> list[dict]:
     """, (limit,))
 
 
+def pitcher_signals_recent(hours: int = 48) -> list[dict]:
+    return query_df("""
+        SELECT ps.id, ps.scanned_at, ps.market_id, m.question,
+               ps.game_start, ps.favored_team, ps.underdog_team,
+               ps.home_pitcher, ps.home_era,
+               ps.away_pitcher, ps.away_era,
+               ps.era_differential, ps.quality_differential,
+               ps.current_price, ps.drift_24h,
+               ps.signal_strength, ps.action
+        FROM pitcher_signals ps
+        LEFT JOIN markets m ON m.id = ps.market_id
+        WHERE ps.scanned_at > NOW() - INTERVAL '%s hours'
+        ORDER BY ps.scanned_at DESC, ps.era_differential DESC
+    """ % hours)
+
+
 def snapshot_counts_per_market(hours: int = 24) -> list[dict]:
     return query_df("""
         SELECT ps.market_id, m.question, m.sport,
@@ -228,3 +244,66 @@ def snapshot_counts_per_market(hours: int = 24) -> list[dict]:
         GROUP BY ps.market_id, m.question, m.sport
         ORDER BY snapshots DESC
     """ % hours)
+
+
+# ── Trading / P&L helpers ─────────────────────────────────────────────────────
+
+def pnl_equity_curve(days: int = 30) -> list[dict]:
+    """Cumulative P&L by closed trade, ordered by exit time."""
+    return query_df(
+        """
+        SELECT exit_ts, pnl_usd, slug, signal_type
+        FROM open_positions
+        WHERE status = 'closed'
+          AND exit_ts IS NOT NULL
+          AND exit_ts >= NOW() - (%s * INTERVAL '1 day')
+        ORDER BY exit_ts ASC
+        """,
+        (days,),
+    )
+
+
+def order_history(limit: int = 50) -> list[dict]:
+    """Recent entries from the order audit log."""
+    return query_df(
+        """
+        SELECT ol.id, ol.created_at, ol.action, ol.price,
+               ol.size_usd, ol.status, ol.clob_order_id,
+               op.slug, op.signal_type
+        FROM order_log ol
+        LEFT JOIN open_positions op ON op.id = ol.position_id
+        ORDER BY ol.created_at DESC
+        LIMIT %s
+        """,
+        (limit,),
+    )
+
+
+def trading_summary() -> dict:
+    """High-level portfolio metrics for the Overview page."""
+    row = query_one(
+        """
+        SELECT
+            COALESCE(SUM(size_usd) FILTER (WHERE status = 'open'),  0) AS exposure,
+            COUNT(*)               FILTER (WHERE status = 'open')       AS open_cnt,
+            COALESCE(SUM(pnl_usd) FILTER (WHERE status = 'closed'
+                                        AND exit_ts >= CURRENT_DATE), 0) AS today_pnl,
+            COALESCE(SUM(pnl_usd) FILTER (WHERE status = 'closed'), 0)  AS alltime_pnl,
+            COUNT(*)               FILTER (WHERE status = 'closed'
+                                        AND pnl_usd > 0)                 AS wins,
+            COUNT(*)               FILTER (WHERE status = 'closed')      AS closed_cnt
+        FROM open_positions
+        """
+    )
+    if not row:
+        return {}
+    cnt = int(row["closed_cnt"] or 0)
+    wins = int(row["wins"] or 0)
+    return {
+        "exposure":    float(row["exposure"] or 0),
+        "open_cnt":    int(row["open_cnt"] or 0),
+        "today_pnl":  float(row["today_pnl"] or 0),
+        "alltime_pnl": float(row["alltime_pnl"] or 0),
+        "win_rate":   f"{wins/cnt*100:.0f}%" if cnt else "—",
+        "closed_cnt":  cnt,
+    }

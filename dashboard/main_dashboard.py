@@ -29,18 +29,20 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from dashboard.pages import cost_analysis, health, live_monitor, markets, movements, overview, signals, tanking
+from dashboard.pages import cost_analysis, health, live_monitor, markets, mlb, movements, overview, signals, tanking, trading
 
 # ── Page registry ─────────────────────────────────────────────────────────────
 PAGES: dict[str, tuple[str, object]] = {
-    "Signals":          ("🎯", signals.render),
-    "Overview":         ("📊", overview.render),
-    "Live Monitor":     ("📡", live_monitor.render),
-    "Markets":          ("📈", markets.render),
-    "Movement Alerts":  ("🎯", movements.render),
-    "Cost Analysis":    ("🔬", cost_analysis.render),
-    "NBA Tanking":      ("🏀", tanking.render),
-    "System Health":    ("⚙️", health.render),
+    "Trading":              ("🏦", trading.render),
+    "Signals":              ("🎯", signals.render),
+    "Overview":             ("📊", overview.render),
+    "Live Monitor":         ("📡", live_monitor.render),
+    "Markets":              ("📈", markets.render),
+    "Movement Alerts":      ("🎯", movements.render),
+    "Cost Analysis":        ("🔬", cost_analysis.render),
+    "NBA Tanking":          ("🏀", tanking.render),
+    "MLB Pitcher Signals":  ("⚾", mlb.render),
+    "System Health":        ("⚙️", health.render),
 }
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────

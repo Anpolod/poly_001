@@ -174,3 +174,79 @@ def tanking_scatter(rows: list[dict]) -> go.Figure:
         height=380,
     )
     return fig
+
+
+def pitcher_scatter(rows: list[dict]) -> go.Figure:
+    """Scatter: era_differential vs current_price, coloured by signal_strength."""
+    if not rows:
+        return go.Figure().update_layout(title="No pitcher signals")
+    df = pd.DataFrame(rows)
+    df["era_differential"] = pd.to_numeric(df["era_differential"], errors="coerce")
+    df["current_price"] = pd.to_numeric(df["current_price"], errors="coerce")
+    color_map = {"HIGH": "#F44336", "MODERATE": "#FFC107", "WATCH": "#4CAF50"}
+    fig = px.scatter(
+        df.dropna(subset=["era_differential", "current_price"]),
+        x="era_differential",
+        y="current_price",
+        color="signal_strength",
+        color_discrete_map=color_map,
+        hover_data=["favored_team", "underdog_team", "home_pitcher", "away_pitcher", "action"],
+        title="MLB Pitcher signals — ERA differential vs market price",
+    )
+    fig.add_hline(y=0.5, line_dash="dot", line_color="#888", annotation_text="50¢")
+    fig.update_layout(
+        xaxis_title="ERA differential (home − away)",
+        yaxis_title="Current YES price",
+        yaxis={"range": [0, 1]},
+        plot_bgcolor="#0E1117",
+        paper_bgcolor="#0E1117",
+        font={"color": "#FAFAFA"},
+        height=380,
+    )
+    return fig
+
+
+def equity_curve(rows: list[dict]) -> go.Figure:
+    """Cumulative P&L line chart from closed trade records."""
+    if not rows:
+        return go.Figure().update_layout(
+            title="No closed trades yet",
+            paper_bgcolor="#0E1117",
+            font={"color": "#FAFAFA"},
+        )
+
+    df = pd.DataFrame(rows)
+    df["exit_ts"] = pd.to_datetime(df["exit_ts"])
+    df["pnl_usd"] = df["pnl_usd"].astype(float)
+    df = df.sort_values("exit_ts")
+    df["cumulative"] = df["pnl_usd"].cumsum()
+
+    color = "#4CAF50" if df["cumulative"].iloc[-1] >= 0 else "#F44336"
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["exit_ts"],
+        y=df["cumulative"],
+        mode="lines+markers",
+        line={"color": color, "width": 2},
+        marker={"size": 6},
+        fill="tozeroy",
+        fillcolor=color.replace(")", ", 0.12)").replace("rgb", "rgba") if color.startswith("rgb") else color + "1F",
+        hovertemplate=(
+            "<b>%{x|%b %d %H:%M}</b><br>"
+            "Cumulative P&L: $%{y:+.2f}<extra></extra>"
+        ),
+    ))
+    fig.add_hline(y=0, line_dash="dash", line_color="#555", line_width=1)
+    fig.update_layout(
+        title="Cumulative P&L",
+        xaxis_title=None,
+        yaxis_title="USD",
+        yaxis_tickprefix="$",
+        plot_bgcolor="#0E1117",
+        paper_bgcolor="#0E1117",
+        font={"color": "#FAFAFA"},
+        height=320,
+        margin={"t": 40, "b": 20, "l": 60, "r": 20},
+    )
+    return fig

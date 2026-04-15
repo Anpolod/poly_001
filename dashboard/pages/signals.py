@@ -61,6 +61,26 @@ def _tanking_opportunities() -> list[dict]:
     """)
 
 
+@st.cache_data(ttl=60)
+def _pitcher_opportunities() -> list[dict]:
+    """MLB pitcher signals with BUY action, last 48h, game not yet started."""
+    return db.query_df("""
+        SELECT ps.favored_team, ps.underdog_team,
+               ps.home_pitcher, ps.home_era,
+               ps.away_pitcher, ps.away_era,
+               ps.era_differential, ps.quality_differential,
+               ps.current_price, ps.drift_24h,
+               ps.signal_strength, ps.action,
+               ps.game_start, ps.scanned_at, ps.market_id
+        FROM pitcher_signals ps
+        WHERE ps.action IN ('BUY', 'SELL')
+          AND ps.scanned_at > NOW() - INTERVAL '48 hours'
+          AND ps.game_start > NOW()
+        ORDER BY ps.era_differential DESC, ps.scanned_at DESC
+        LIMIT 20
+    """)
+
+
 @st.cache_data(ttl=120)
 def _go_markets_with_drift() -> list[dict]:
     """GO-verdict markets that have moved significantly in last 6h."""
@@ -155,17 +175,20 @@ def render() -> None:
     prop_rows = _prop_opportunities()
     tank_rows = _tanking_opportunities()
     go_rows = _go_markets_with_drift()
+    pitcher_rows = _pitcher_opportunities()
 
     # ── Summary banner ────────────────────────────────────────────────────
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     c1.metric("Prop opportunities", len(prop_rows),
               help="Positive-EV player props (unresolved, last 24h)")
     c2.metric("Tanking BUY/SELL", len(tank_rows),
               help="Tanking signals with actionable recommendation (last 48h)")
-    c3.metric("GO markets moving", len(go_rows),
+    c3.metric("MLB Pitcher BUY/SELL", len(pitcher_rows),
+              help="MLB ERA mismatch signals with BUY/SELL action (last 48h)")
+    c4.metric("GO markets moving", len(go_rows),
               help="GO-verdict markets with >2% drift in last 6h")
 
-    no_signals = not prop_rows and not tank_rows and not go_rows
+    no_signals = not prop_rows and not tank_rows and not go_rows and not pitcher_rows
     if no_signals:
         st.warning(
             "No active signals right now.\n\n"
@@ -270,7 +293,55 @@ def render() -> None:
     st.divider()
 
     # ══════════════════════════════════════════════════════════════════════
-    # SECTION 3: GO MARKETS WITH DRIFT
+    # SECTION 3: MLB PITCHER SIGNALS
+    # ══════════════════════════════════════════════════════════════════════
+    st.subheader(f"⚾ MLB Pitcher ERA Mismatches ({len(pitcher_rows)})")
+
+    if not pitcher_rows:
+        st.info("No actionable MLB pitcher signals. Run: `make mlb` then click Re-scan on the MLB page.")
+    else:
+        df_pitch = pd.DataFrame(pitcher_rows)
+        for col in ["era_differential", "quality_differential", "current_price", "drift_24h"]:
+            df_pitch[col] = pd.to_numeric(df_pitch[col], errors="coerce")
+
+        df_pitch["time_to_game"] = df_pitch["game_start"].apply(_hours_until)
+        df_pitch["price_pct"] = (df_pitch["current_price"] * 100).round(1).astype(str) + "¢"
+        df_pitch["era_diff_fmt"] = df_pitch["era_differential"].round(2)
+        df_pitch["matchup"] = df_pitch["favored_team"] + " vs " + df_pitch["underdog_team"]
+        df_pitch["pitchers"] = (
+            df_pitch["home_pitcher"].fillna("?") + " vs " + df_pitch["away_pitcher"].fillna("?")
+        )
+
+        show = df_pitch[[
+            "action", "signal_strength", "matchup", "pitchers",
+            "era_diff_fmt", "price_pct", "time_to_game"
+        ]].rename(columns={
+            "action": "Action", "signal_strength": "Strength",
+            "matchup": "Matchup", "pitchers": "Pitchers",
+            "era_diff_fmt": "ERA Δ", "price_pct": "Price",
+            "time_to_game": "Time to game",
+        })
+
+        styled = show.style \
+            .apply(_color_action, subset=["Action"]) \
+            .apply(_color_strength, subset=["Strength"])
+        st.dataframe(styled, use_container_width=True, hide_index=True)
+
+        buy_pitcher = [r for r in pitcher_rows if r.get("action") == "BUY"]
+        if buy_pitcher:
+            best = buy_pitcher[0]
+            st.success(
+                f"**Best MLB BUY:** {best.get('favored_team')} vs {best.get('underdog_team')} | "
+                f"ERA diff: {float(best.get('era_differential') or 0):.2f} | "
+                f"Price: {float(best.get('current_price',0))*100:.0f}¢ | "
+                f"Strength: **{best.get('signal_strength')}** | "
+                f"Game: {_hours_until(best.get('game_start'))}"
+            )
+
+    st.divider()
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SECTION 4: GO MARKETS WITH DRIFT
     # ══════════════════════════════════════════════════════════════════════
     st.subheader(f"📈 GO Markets Moving ({len(go_rows)})")
     st.caption("GO-verdict markets with >2% price drift in last 6h — potential momentum entries")
