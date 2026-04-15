@@ -1,139 +1,155 @@
 # TASKS.md
 
-> Last updated: 2026-04-04 (T-01–T-18 all completed)
+> Last updated: 2026-04-14
 > Priority: P1 = blocking / P2 = important / P3 = nice-to-have
+> Previous tasks (T-01 → T-18): all completed, archived in git history
 
 ---
 
-## P1 — Bugs & Stability risks
+## P1 — MLB Pitcher Scanner (Phase B)
 
-~~### T-01 · Config validation at startup~~
-~~**File:** `main.py`, `cost_analyzer.py`~~
-**Done:** `config/validate.py` — startup validation with fail-fast error list. Called in both `main.py` and `cost_analyzer.py`.
-
----
-
-~~### T-02 · Wrap Phase 0 DB inserts in try/except~~
-~~**File:** `cost_analyzer.py`~~
-**Done:** `upsert_market` and `insert_cost_analysis` wrapped in try/except with per-market error logging.
+### T-19 · MLB Pitcher Scanner — deploy and validate ✅
+**Files:** `collector/mlb_data.py`, `analytics/mlb_pitcher_scanner.py`, `config/mlb_team_aliases.yaml`
+**Done:** ESPN API client (schedule + pitcher stats), scanner with signal classification (HIGH/MODERATE/WATCH), DB table `pitcher_signals`, config section, Makefile targets, bot_main integration.
 
 ---
 
-~~### T-03 · Expose `filter_tradeable()` thresholds in config~~
-~~**File:** `collector/market_discovery.py`~~
-**Done:** All thresholds read from `config.filter_tradeable` with fallbacks to `phase1` values.
+### T-20 · Create pitcher_signals DB table on Mac Mini ✅
+**Status:** DONE — `db/init_schema.py` ran on Mac Mini 2026-04-14, all 12 tables created
+**Command:**
+```bash
+psql -p 5432 -U polybot -d polymarket -f db/schema.sql
+# или только новую таблицу:
+psql -p 5432 -U polybot -d polymarket -c "
+CREATE TABLE IF NOT EXISTS pitcher_signals (
+    id SERIAL PRIMARY KEY,
+    scanned_at TIMESTAMPTZ DEFAULT NOW(),
+    market_id TEXT NOT NULL,
+    game_start TIMESTAMPTZ,
+    favored_team TEXT, underdog_team TEXT,
+    home_pitcher TEXT, home_era FLOAT,
+    away_pitcher TEXT, away_era FLOAT,
+    era_differential FLOAT, quality_differential FLOAT,
+    current_price FLOAT, drift_24h FLOAT,
+    signal_strength TEXT, action TEXT,
+    traded BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_pitcher_signals_market ON pitcher_signals (market_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pitcher_signals_game_start ON pitcher_signals (game_start);
+"
+```
 
 ---
 
-~~### T-04 · Replace plaintext DB password with env-var support~~
-~~**File:** `config/settings.example.yaml`, `db/repository.py`~~
-**Done:** `DB_HOST/PORT/NAME/USER/PASSWORD` env-var overrides in `repository.py`. Documented in `settings.example.yaml`.
+### T-21 · First MLB scanner dry run — verify ESPN data + Polymarket matching ✅
+**Status:** DONE — 2026-04-14
+- Переключили с ESPN `/athletes` (404 на всех) на MLB Stats API (`statsapi.mlb.com`)
+- 30 игр, 50/53 питчеров с ERA/WHIP, 4 HIGH сигнала с реальными Polymarket рынками
+- `collector/mlb_data.py` переписан: schedule + stats через MLB Stats API
 
 ---
 
-## P2 — Completeness & Integration
-
-~~### T-05 · Integrate `cost_backfill.py` into Phase 0 or a CLI command~~
-~~**File:** `analytics/cost_backfill.py`~~
-**Done:** `--backfill` flag added to `cost_analyzer.py` — runs `cost_backfill.run()` after Phase 0 scan completes. Standalone `python -m analytics.cost_backfill` also documented in CLAUDE.md.
-
----
-
-~~### T-06 · Add checkpoint/resume to Phase 0 scan~~
-~~**File:** `cost_analyzer.py`~~
-**Done:** `.phase0_checkpoint.json` persists processed IDs atomically after each market. Resume is automatic on restart; `--fresh` flag forces full rescan.
+### T-22 · Run MLB scanner in watch mode — накапливать данные ✅
+**Status:** RUNNING — запущен 2026-04-14, PID 7588
+**Command:** `nohup venv/bin/python -m analytics.mlb_pitcher_scanner --watch --save >> logs/mlb_scanner.log &`
+**Добавлен в** `scripts/start_bot.sh` — стартует автоматически при `make start`
+**Данные:** 9 сигналов записано в `pitcher_signals` за первый цикл
+**Ждать:** 2-3 дня накопления перед тюнингом порогов (T-23)
 
 ---
 
-~~### T-07 · Make WS silence threshold configurable~~
-~~**File:** `collector/ws_client.py`~~
-**Done:** `ws_silence_threshold_sec` read from config (default 60s). Also moved `_HEARTBEAT_INTERVAL` and `_GAP_THRESHOLD_SECONDS` from module-level constants to instance vars reading existing config keys.
+### T-23 · Tune MLB scanner thresholds based on collected data
+**Status:** TODO (after T-22)
+**Что подкрутить:**
+- `min_era_differential` (сейчас 1.0 — может быть слишком низко)
+- `high_era_threshold` / `high_quality_threshold` (пороги для HIGH сигнала)
+- Price thresholds в `_recommended_action()` (сейчас: BUY если < 0.65)
+- Добавить bullpen fatigue factor если данные покажут что это влияет
 
 ---
 
-~~### T-08 · Add real alerting to `alerts/logger_alert.py`~~
-~~**File:** `alerts/logger_alert.py`~~
-**Done:** Slack Incoming Webhook added (`_slack()` helper via aiohttp). Triggers: Phase 0 complete, collector started, data gap, spike detected, WS reconnect loop (≥3 consecutive attempts). Config key `alerts.slack_webhook_url` in `settings.example.yaml`. `WsClient` gained `on_reconnect` callback + `_reconnect_attempt` counter; wired in `main.py`. Failures are logged as warnings and never propagate.
+## P2 — Optimizations
+
+### T-24 · Tanking pattern hourly backtest
+**Status:** TODO
+**Цель:** построить кривую drift по часам для tanking-матчей (T-36h → T-0h). Найти оптимальный entry/exit.
+**Как:** расширить `tanking_scanner.py → run_backtest()` — добавить hourly granularity (сейчас только T-24h, T-12h, T-6h, T-2h).
 
 ---
 
-~~### T-09 · Promote analytics scripts to CLI tools~~
-~~**Files:** `analytics/spike_vs_drift_report.py`, `analytics/timing_analyzer.py`, `analytics/movement_analyzer.py`~~
-**Done:** `movement_analyzer` — `--from-date`, `--to-date`, `--sport`, `--min-snapshots`, `--output`. `spike_vs_drift_report` — `--min-snapshots`, `--output`. `timing_analyzer` — already had full argparse. All documented in CLAUDE.md.
+### T-25 · P&L аудит — реальный средний profit/loss
+**Status:** TODO
+**Цель:** посчитать средний лосс на 16 минусовых сделках из 83. Это ключевой вопрос — если средний лосс > средний профит, то 78.6% WR менее впечатляет.
+**Как:** query `open_positions WHERE signal_type='tanking' AND status='closed'` → агрегация по pnl_usd.
 
 ---
 
-~~### T-10 · Remove unused `httpx` dependency~~
-~~**File:** `requirements.txt`~~
-**Done:** `httpx`, `httpcore`, `h11` removed (all unused; httpcore/h11 were httpx transitive deps).
+### T-26 · Back-to-back filter for tanking scanner ✅
+**Status:** DONE — 2026-04-15
+**Файл:** `analytics/tanking_scanner.py`
+**Что:** ESPN schedule API детектирует B2B; HIGH→MODERATE, MODERATE→WATCH; флаг в таблице.
 
 ---
 
-## P2 — Testing
-
-~~### T-11 · Add tests for collector modules~~
-~~**Files:** `collector/rest_client.py`, `collector/ws_client.py`, `collector/normalizer.py`, `collector/market_discovery.py`~~
-**Done:** `tests/test_collector.py` — 52 tests. Covers: normalizer (spread_pct, price_move 3 formats, snapshot), market_discovery (detect_sport, is_sports_market, liquidity_metrics, all 7 filter_tradeable filters), rest_client (parse_event edge cases, get_orderbook HTTP mocks via aioresponses).
-
----
-
-~~### T-12 · Add tests for `db/repository.py`~~
-~~**File:** `db/repository.py`~~
-**Done:** `tests/test_repository.py` — 15 tests with mocked asyncpg pool. Covers: upsert_market params + default status, get_active_markets SQL filters, update_market_status, insert_snapshot ON CONFLICT, insert_trade ON CONFLICT + default trade_id, insert_spike_event, insert_gap, close_gap minutes calculation + SQL filter.
+### T-27 · Dynamic exit trigger ✅
+**Status:** DONE — 2026-04-15
+**Файл:** `trading/exit_monitor.py`
+**Что:** `check_stagnation_exit()` — выход если последние 3 снапшота без движения > 0.5¢. Гарды: held ≥ 30min, game > 2h. Вызывается каждый цикл в bot_main рядом с check_and_exit.
 
 ---
 
-~~### T-13 · Migrate tests to pytest~~
-~~**Files:** `tests/test_cost_analyzer.py`, `tests/test_standalone.py`~~
-**Done:** Both files converted to pytest. `pytest>=8.0` + `pytest-asyncio>=0.24` added to `requirements.txt`. `pyproject.toml` added with `testpaths=tests`, `asyncio_mode=auto`. 17/17 pass.
+## P2 — New Strategies (Phase C-F)
+
+### T-28 · Injury Scanner
+**Status:** PLANNED
+**Файлы:** `analytics/injury_scanner.py` (новый), DB: `injury_signals`
+**Суть:** парсить Rotowire каждые 10 мин, ловить OUT/DOUBTFUL для ключевых игроков (PPG ≥ 15), сигнал на покупку противника.
 
 ---
 
-## P3 — Code Quality & Ops
-
-~~### T-14 · Add docstrings to key classes and methods~~
-~~**Files:** All collector, analytics, db modules~~
-**Done:** Class docstrings added to `Repository`, `RestClient`, `WsClient`, `MarketInfo`, `MarketDiscovery`, `LoggerAlert`, `Collector`. Method docstrings added to all public methods in `repository.py` (12), `rest_client.py` (start, close), plus `send` in `logger_alert.py`. `normalizer.py` and `analytics/cost_analyzer.py` were already complete.
-
----
-
-~~### T-15 · Add linting and type checking~~
-~~**Files:** project root~~
-**Done:** `ruff>=0.1`, `mypy>=1.0`, `types-PyYAML`, `types-tabulate` added to `requirements.txt`. `pyproject.toml` extended with `[tool.ruff]` (line-length=120, E/F/W/I/B rules, B905 ignored) and `[tool.mypy]` (python_version=3.10, ignore_missing_imports, explicit_package_bases). `Makefile` created with `lint`, `typecheck`, `test`, `fix`, `all` targets. 38 issues auto-fixed; 9 remaining manually resolved (3 unused vars, 5 type annotation gaps, 6 `# noqa: E501` for unavoidable long strings). `make lint` and `make typecheck` both pass clean.
+### T-29 · Calibration Trader
+**Status:** PLANNED
+**Файлы:** `analytics/calibration_signal.py` (новый), DB: `calibration_edges`
+**Суть:** автоматизировать favorite-longshot bias. Daily build edge table → online scan vs active markets.
 
 ---
 
-~~### T-16 · Add GitHub Actions CI pipeline~~
-~~**File:** `.github/workflows/ci.yml` (new)~~
-**Done:** `.github/workflows/ci.yml` — triggers on push/PR to master. Steps: checkout → Python 3.12 → pip cache (keyed on requirements.txt hash) → install → `ruff check` → `mypy` → `pytest -v`. Also added missing `PyYAML==6.0.3` and `tabulate==0.10.0` to `requirements.txt`.
+### T-30 · Real-time Drift Monitor
+**Status:** PLANNED
+**Суть:** кросс-спортивный алерт при drift > 4% за 6ч без news event. Overlay поверх других стратегий.
 
 ---
 
-~~### T-17 · Add market lifecycle monitoring~~
-~~**File:** `collector/market_discovery.py`, `db/repository.py`~~
-**Done:** `_discover_markets()` in `main.py` cross-checks active markets vs API on each rescan; marks settled in DB and removes from snapshot loop. Analytics queries filter `status != 'settled'` and `event_start > NOW() - INTERVAL '3 hours'`.
+### T-31 · Spike Follow
+**Status:** PLANNED
+**Файлы:** `analytics/spike_signal.py` (новый)
+**Суть:** follow smart money после spike events (magnitude ≥ 5¢, ≥ 4 steps).
 
 ---
 
-~~### T-18 · Translate Ukrainian inline comments to English~~
-~~**Files:** Multiple (rest_client.py, ws_client.py, others)~~
-**Done:** All Ukrainian docstrings, inline comments, log messages, and print statements translated to English across ws_client.py, rest_client.py, market_discovery.py, normalizer.py, repository.py, alerts/logger_alert.py, analytics/cost_analyzer.py, db/init_schema.py, cost_analyzer.py, main.py. Also removed two unused `Optional` imports surfaced during the pass.
+## P3 — Infrastructure & Cleanup
+
+### T-32 · Clean up project root
+**Status:** TODO
+**Что:** переместить `PROJECT_STATE.md` → `docs/`, `phase0_*.csv/json/md` → `docs/phase0/`, удалить `Untitled.base`. Обновить `.gitignore` если нужно.
 
 ---
 
-## Completed
+### T-33 · Add MLB to Streamlit dashboard
+**Status:** TODO
+**Что:** новая страница "MLB Pitcher Signals" в dashboard — аналогично NBA Tanking page. Таблица из `pitcher_signals`, фильтр по signal_strength, график drift по времени.
 
-- **T-01** Config validation at startup (`config/validate.py`)
-- **T-02** Phase 0 DB inserts wrapped in try/except
-- **T-03** `filter_tradeable()` thresholds read from config
-- **T-04** DB env-var overrides (`DB_HOST/PORT/NAME/USER/PASSWORD`)
-- **T-05** `cost_backfill.py` інтегровано як `--backfill` флаг у `cost_analyzer.py`
-- **T-06** Phase 0 checkpoint/resume (`.phase0_checkpoint.json`, `--fresh` flag)
-- **T-07** WS silence threshold configurable (`ws_silence_threshold_sec`); heartbeat + gap threshold also moved to config
-- **T-09** Analytics scripts promoted to CLI tools with argparse (`--from-date`, `--to-date`, `--sport`, `--min-snapshots`, `--output`)
-- **T-10** `httpx`, `httpcore`, `h11` removed from `requirements.txt`
-- **T-13** Tests migrated to pytest — 17/17 pass (`venv/bin/pytest -v`)
-- **T-11** Collector tests — 52 tests in `tests/test_collector.py` (normalizer, market_discovery, rest_client). Full suite: **69/69 passed**
-- **T-12** Repository tests — 15 tests in `tests/test_repository.py` (mocked asyncpg pool). Full suite: **84/84 passed**
-- **T-17** Market lifecycle monitoring (settled detection on rescan, analytics filters)
-- **T-18** Ukrainian → English translation (all .py files: docstrings, comments, log messages, print statements)
+---
+
+### T-34 · MLB data collection pipeline
+**Status:** TODO (если решим собирать historical данные)
+**Что:** добавить MLB market discovery в `main.py` коллектор, чтобы снапшоты MLB рынков записывались так же как NBA. Это даст данные для будущего бэктеста.
+
+---
+
+## Completed (this sprint)
+
+- **T-19** MLB Pitcher Scanner built: `collector/mlb_data.py` + `analytics/mlb_pitcher_scanner.py` + `config/mlb_team_aliases.yaml` + DB table + config + Makefile + bot_main integration
+- **T-20** DB schema deployed on Mac Mini (all 12 tables)
+- **T-21** MLB scanner validated: switched to MLB Stats API, 50/53 pitchers enriched, 4 HIGH signals found
+- **T-22** MLB scanner running in watch mode on Mac Mini, added to start_bot.sh autostart
