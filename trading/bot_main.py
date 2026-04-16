@@ -251,12 +251,47 @@ async def _process_tanking_signal(
     tg_token: str,
     tg_chat_id: str,
     total_exposure: float,
+    aliases: dict[str, str] | None = None,
 ) -> float:
-    """Handle one tanking signal: risk check → confirm → execute. Returns added exposure."""
-    token_id = await _get_token_id(pool, signal.market_id)
+    """Handle one tanking signal: risk check → confirm → execute. Returns added exposure.
+
+    T-36: resolve the motivated team's actual Polymarket side before trading.
+    Earlier versions always bought token_id_yes — on NO-side motivated markets
+    that silently took the opposite side of the signal. Mirror of the T-35
+    MLB fix. If aliases is None (backward-compat for any legacy callers), we
+    fall back to the scanner's `motivated_side` and YES-token semantics.
+    """
+    # T-36: resolve the motivated team's side + correct token id. We prefer
+    # the live DB lookup over `signal.motivated_side` so a remap between
+    # scan-time and execution-time is caught rather than silently traded on.
+    if aliases is not None:
+        exec_token_id, resolved_side = await resolve_team_token_side(
+            pool, signal.market_id, signal.motivated_team, aliases
+        )
+        if exec_token_id is None or resolved_side is None:
+            logger.warning(
+                "Skipping tanking %s — could not resolve motivated-team side for %s",
+                signal.motivated_team, signal.market_id,
+            )
+            return 0.0
+        if signal.motivated_side and signal.motivated_side != resolved_side:
+            logger.warning(
+                "Tanking side mismatch for %s on %s: scanner=%s vs live=%s — skipping",
+                signal.motivated_team, signal.market_id,
+                signal.motivated_side, resolved_side,
+            )
+            return 0.0
+        token_id = exec_token_id
+        motivated_side = signal.motivated_side or resolved_side
+    else:
+        # Legacy fallback (e.g. prop/drift callers never hit here; kept for
+        # test harnesses that construct signals without aliases).
+        token_id = await _get_token_id(pool, signal.market_id)
+        motivated_side = signal.motivated_side or "YES"
+
     min_depth = config["trading"].get("min_ask_depth_usd", 50)
 
-    # Fetch live market state for entry filter
+    # Fetch live market state for entry filter — against the motivated-side token
     bid, ask, ask_depth_usd = 0.0, 0.0, 0.0
     if token_id:
         try:
@@ -298,7 +333,7 @@ async def _process_tanking_signal(
     market_line = f"Market: {entry_emoji} {entry_reason}\n"
     extra = (
         f"{market_line}"
-        f"Game in {signal.hours_to_game:.1f}h  |  diff={signal.motivation_differential:.1f}\n"
+        f"Side: {motivated_side}  |  Game in {signal.hours_to_game:.1f}h  |  diff={signal.motivation_differential:.1f}\n"
         f"{drift_str}"
         f"vs {signal.tanking_team}"
     )
@@ -349,7 +384,7 @@ async def _process_tanking_signal(
     order_id_str = order["order_id"]
     actual_shares = order.get("size_shares", size_shares)
 
-    # Persist
+    # Persist — T-36: real side (not hardcoded YES) so DB audit matches execution
     position_id = await open_position(
         pool,
         market_id=signal.market_id,
@@ -361,7 +396,8 @@ async def _process_tanking_signal(
         entry_price=trade_price,
         game_start=signal.game_start,
         clob_order_id=order_id_str,
-        notes=f"motivated={signal.motivated_team} tanking={signal.tanking_team}",
+        notes=f"motivated={signal.motivated_team}({motivated_side}) tanking={signal.tanking_team}",
+        side=motivated_side,
     )
     await log_order(pool, signal.market_id, position_id, "buy", order)
 
@@ -372,6 +408,7 @@ async def _process_tanking_signal(
         size_shares=actual_shares,
         size_usd=size_usd,
         order_id=order.get("order_id", ""),
+        side=motivated_side,
         status=order.get("status", ""),
     )
 
@@ -1217,7 +1254,8 @@ async def run_loop(config: dict) -> None:
                         logger.debug("Decay cache: suppressing %s", signal.motivated_team)
                         continue
                     added = await _process_tanking_signal(
-                        signal, pool, executor, config, tg_token, tg_chat_id, total_exp
+                        signal, pool, executor, config, tg_token, tg_chat_id, total_exp,
+                        aliases=aliases,
                     )
                     total_exp += added
 

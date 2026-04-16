@@ -65,11 +65,16 @@ class TankingSignal:
     motivated_team: str
     tanking_team: str
     motivation_differential: float
-    current_price: float                   # YES price for motivated team
+    # T-36: current_price is ALWAYS the motivated team's contract price — if the
+    # motivated team is on Polymarket's NO side this has already been inverted
+    # to (1 - yes_mid). Execution path must NOT re-flip it. Mirror of the
+    # T-41 MLB scanner fix.
+    current_price: float
     price_24h_ago: Optional[float]
     actual_drift: Optional[float]          # current_price - price_24h_ago
     pattern_strength: str                  # "HIGH" / "MODERATE" / "WATCH"
     recommended_action: str                # "BUY" / "SELL / CLOSE" / "WATCH"
+    motivated_side: Optional[str] = None   # T-36: 'YES' or 'NO' — which Polymarket side
     is_back_to_back: bool = False          # motivated team played yesterday
     lineup_notes: list[str] = field(default_factory=list)
 
@@ -470,8 +475,33 @@ async def scan_tanking_patterns(
             event_start = event_start.replace(tzinfo=timezone.utc)
         hours_to_game = (event_start - now).total_seconds() / 3600
 
-        current_price = float(m["current_price"] or 0.0)
-        price_24h = float(m["price_24h_ago"]) if m["price_24h_ago"] is not None else None
+        yes_mid = float(m["current_price"] or 0.0)
+        yes_24h = float(m["price_24h_ago"]) if m["price_24h_ago"] is not None else None
+
+        # T-36: resolve which Polymarket side the motivated team is on. The
+        # price_snapshots table stores the YES-token mid; for NO-side motivated
+        # teams we must invert to (1 - yes_mid) — otherwise dashboards, DB
+        # rows and the BUY/WATCH action are computed off the tanking team's
+        # contract price. Mirror of the T-41 MLB scanner fix. Import-locally
+        # to avoid a circular dependency on trading/ from analytics/.
+        from trading.position_manager import resolve_team_token_side
+        _, motivated_side = await resolve_team_token_side(
+            pool, m["id"], motivated.display_name, aliases
+        )
+        if motivated_side is None:
+            logger.debug(
+                "Skipping %s (%s vs %s): could not resolve motivated-team side",
+                m.get("slug"), motivated.display_name, tanking.display_name,
+            )
+            continue
+
+        if motivated_side == "YES":
+            current_price = yes_mid
+            price_24h = yes_24h
+        else:   # NO — invert
+            current_price = 1.0 - yes_mid
+            price_24h = (1.0 - yes_24h) if yes_24h is not None else None
+
         drift = (current_price - price_24h) if price_24h is not None else None
 
         strength = _pattern_strength(abs(diff))
@@ -490,6 +520,7 @@ async def scan_tanking_patterns(
             actual_drift=round(drift, 4) if drift is not None else None,
             pattern_strength=strength,
             recommended_action=action,
+            motivated_side=motivated_side,
         ))
 
     # Sort: HIGH first, then by differential descending

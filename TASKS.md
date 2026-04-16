@@ -216,7 +216,48 @@ CREATE INDEX IF NOT EXISTS idx_pitcher_signals_game_start ON pitcher_signals (ga
 - 48/48 unit tests passing
 
 **Не сделано (out-of-scope, новая мини-задача T-36):**
-- tanking_scanner миграция на `resolve_team_token_side` — латентная та же проблема, но не критична; отдельная задача
+- tanking_scanner миграция на `resolve_team_token_side` — латентная та же проблема, но не критична; отдельная задача  → **DONE в T-36 (см. ниже)**
+
+---
+
+### T-36 · Tanking scanner NO-side latent fix ✅
+**Status:** DONE — 2026-04-16
+**Источник:** latent follow-up от T-35 (MLB NO-side execution fix); round 9 post-ship catch-up
+**Время:** ~25 мин + 2 новых теста (всего 223 pass)
+
+**Проблема:**
+`analytics/tanking_scanner.py` хранил `current_price = m["current_price"]` предполагая что motivated_team всегда на YES стороне. `_process_tanking_signal` в bot_main'е вызывал `_get_token_id` который blindly возвращает `token_id_yes`. Если motivated team на NO стороне Polymarket'а:
+- bot buyит token_id_yes по YES-side price logic против underdog'а
+- `open_position(..., side='YES')` (hardcoded до T-38) пишет wrong side
+- dashboard показывает wrong side
+
+NBA markets обычно YES-side, но bug latent — при любом NO-side motivated матче молчаливая ошибка execution.
+
+**Fix (mirror T-35 + T-41 MLB pattern):**
+
+1. **Scanner** ([analytics/tanking_scanner.py](analytics/tanking_scanner.py#L440)):
+   - `TankingSignal.motivated_side: Optional[str]` field
+   - Scan loop вызывает `resolve_team_token_side(pool, market_id, motivated, aliases)`
+   - Если `motivated_side == "NO"` → inverts `current_price = 1 - yes_mid` и `price_24h = 1 - yes_24h`
+   - Skipит markets где side не резолвится — безопаснее misleading data
+   - Import `resolve_team_token_side` локальный (внутри функции) чтобы избежать circular dep `analytics → trading`
+
+2. **Execution** ([trading/bot_main.py::_process_tanking_signal](trading/bot_main.py#L246)):
+   - Новый параметр `aliases: dict[str, str] | None = None`
+   - Когда aliases передан — resolves token + side via `resolve_team_token_side`, сравнивает с `signal.motivated_side` (scanner-time), abort на mismatch
+   - Передаёт `side=motivated_side` в `open_position` + `send_order_confirmation`
+   - Extra info в Telegram alert включает `Side: {motivated_side}` + notes в DB
+   - Call site обновлён передавать `aliases=aliases` (уже loaded via `load_aliases()` at startup)
+
+3. **tanking_signals таблица** — НЕ migrated (no new column). `motivated_side` хранится только in-memory для execution path. DB audit trail через `open_positions.side` уже работает правильно.
+
+**Новые тесты** ([tests/test_position_manager_records.py](tests/test_position_manager_records.py) — 2 новых):
+- `test_process_tanking_signal_uses_signal_price_for_no_side_directly` — NO-side signal с `current_price=0.72` → `executor.buy` получает 0.72/0.73 (НЕ 0.28 = 1-0.72), `open_position` получает `side="NO"` и `token_id="NO_TOKEN_ID"`
+- `test_process_tanking_signal_aborts_on_side_mismatch` — scanner-time side ≠ live-resolve side → `executor.buy` не вызывается, exposure=0
+
+**Verification:**
+- **223/223 Python tests** pass (2 новых + 221 после T-45)
+- Pattern consistent с MLB: scanner side-corrects → execution trusts signal + verifies live
 
 ---
 

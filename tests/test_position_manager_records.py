@@ -555,6 +555,151 @@ def test_process_pitcher_signal_uses_signal_price_for_no_side_directly() -> None
     )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# T-36 — tanking scanner NO-side correctness
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_tanking_signal(motivated_side: str, current_price: float):
+    """Build a minimal TankingSignal. Scanner writes `current_price` already
+    side-corrected (i.e. 1 - yes_mid for NO-side motivated teams) since T-36."""
+    from datetime import datetime, timezone
+    from analytics.tanking_scanner import TankingSignal
+
+    return TankingSignal(
+        market_id="nba-det-phi-2026-04-17",
+        slug="nba-det-phi-2026-04-17",
+        game_start=datetime(2026, 4, 17, 23, 0, tzinfo=timezone.utc),
+        hours_to_game=10.0,
+        motivated_team="Philadelphia 76ers",
+        tanking_team="Detroit Pistons",
+        motivation_differential=2.5,
+        current_price=current_price,
+        price_24h_ago=None,
+        actual_drift=None,
+        pattern_strength="HIGH",
+        recommended_action="BUY",
+        motivated_side=motivated_side,
+    )
+
+
+def test_process_tanking_signal_uses_signal_price_for_no_side_directly() -> None:
+    """T-36 HIGH fix: on a NO-side tanking signal, _process_tanking_signal must
+    feed `signal.current_price` (already side-correct per T-36 scanner change)
+    straight into executor.buy / send_order_confirmation — NOT re-derive from
+    a blind YES-token lookup, which would buy the tanking team's contract.
+
+    Mirrors the T-42 test for MLB. Pin the exact price handed to buy() and
+    the `side` argument of the confirmation message to catch any regression.
+    """
+    from unittest.mock import patch, AsyncMock
+    from trading import bot_main
+
+    signal = _make_tanking_signal(motivated_side="NO", current_price=0.72)
+    config = {
+        "trading": {
+            "enabled": True,
+            "min_ask_depth_usd": 10,
+            "max_total_exposure_usd": 100,
+        },
+    }
+
+    executor = AsyncMock()
+    executor.get_market_info = AsyncMock(return_value={
+        "bid": 0.71, "ask": 0.73, "ask_depth_usd": 200.0,
+    })
+    executor.buy = AsyncMock(return_value={
+        "order_id": "0xTANK", "status": "matched", "size_shares": 13.0,
+    })
+
+    pool = AsyncMock()
+
+    with patch("trading.bot_main.resolve_team_token_side",
+               new=AsyncMock(return_value=("NO_TOKEN_ID", "NO"))), \
+         patch("trading.bot_main.correlation_check",
+               new=AsyncMock(return_value=(False, ""))), \
+         patch("trading.bot_main.can_open",
+               return_value=(True, "")), \
+         patch("trading.bot_main.check_entry",
+               return_value=("enter", "ok", "✅")), \
+         patch("trading.bot_main.position_size_by_ev",
+               return_value=(10.0, 13.0)), \
+         patch("trading.bot_main.tanking_roi_estimate",
+               return_value=5.0), \
+         patch("trading.bot_main.send_signal_alert",
+               new=AsyncMock()) as mock_signal_alert, \
+         patch("trading.bot_main.open_position",
+               new=AsyncMock(return_value=777)) as mock_open_position, \
+         patch("trading.bot_main.log_order",
+               new=AsyncMock()), \
+         patch("trading.bot_main.send_order_confirmation",
+               new=AsyncMock()) as mock_order_confirm:
+        asyncio.run(bot_main._process_tanking_signal(
+            signal=signal,
+            pool=pool,
+            executor=executor,
+            config=config,
+            tg_token="tok",
+            tg_chat_id="chat",
+            total_exposure=0.0,
+            aliases={"76ers": "Philadelphia 76ers"},
+        ))
+
+    # Critical: executor.buy called with NO-side token + NO-side price (not flipped)
+    buy_args = executor.buy.await_args
+    token_arg = buy_args.args[0]
+    price_arg = buy_args.args[1]
+    assert token_arg == "NO_TOKEN_ID", f"wrong token_id: {token_arg!r}"
+    # ask (0.73) beats signal price (0.72) in enter-mode; either is acceptable.
+    # The guard: price must NOT be 1 - 0.72 = 0.28 (the tanking team's YES price).
+    assert abs(price_arg - 0.73) < 1e-9 or abs(price_arg - 0.72) < 1e-9, (
+        f"buy price {price_arg} looks double-inverted; expected 0.72/0.73"
+    )
+    assert abs(price_arg - 0.28) > 1e-9, (
+        f"REGRESSION: tanking scanner's side-correct price was re-flipped — "
+        f"price={price_arg} equals 1 - signal.current_price"
+    )
+
+    # Alert price is the signal's side-correct value (not re-flipped)
+    alert_kwargs = mock_signal_alert.await_args.kwargs
+    assert abs(alert_kwargs["price"] - 0.72) < 1e-9
+
+    # open_position was called with side='NO' so DB audit matches execution
+    open_kwargs = mock_open_position.await_args.kwargs
+    assert open_kwargs["side"] == "NO", (
+        f"open_position got side={open_kwargs['side']!r}, expected 'NO'"
+    )
+    assert open_kwargs["token_id"] == "NO_TOKEN_ID"
+
+    # Telegram order confirmation receives side='NO'
+    confirm_kwargs = mock_order_confirm.await_args.kwargs
+    assert confirm_kwargs["side"] == "NO"
+
+
+def test_process_tanking_signal_aborts_on_side_mismatch() -> None:
+    """T-36 defensive: if scanner-time side disagrees with live-resolve side,
+    refuse to trade rather than pick one. Mirror of the MLB mismatch test."""
+    from unittest.mock import patch, AsyncMock
+    from trading import bot_main
+
+    signal = _make_tanking_signal(motivated_side="YES", current_price=0.60)
+    config = {"trading": {"enabled": True, "min_ask_depth_usd": 10, "max_total_exposure_usd": 100}}
+    executor = AsyncMock()
+    executor.get_market_info = AsyncMock(return_value={"bid": 0.59, "ask": 0.61, "ask_depth_usd": 200.0})
+    executor.buy = AsyncMock()
+
+    with patch("trading.bot_main.resolve_team_token_side",
+               new=AsyncMock(return_value=("SOME_TOKEN", "NO"))):
+        added = asyncio.run(bot_main._process_tanking_signal(
+            signal=signal, pool=AsyncMock(), executor=executor, config=config,
+            tg_token="tok", tg_chat_id="chat", total_exposure=0.0,
+            aliases={"76ers": "Philadelphia 76ers"},
+        ))
+
+    assert added == 0.0
+    executor.buy.assert_not_awaited()
+
+
 def test_process_pitcher_signal_aborts_on_side_mismatch() -> None:
     """T-42 defensive: if the scanner recorded favored_side='YES' but the live
     resolve returns 'NO' (token id remapped mid-flight, stale cache, etc.),

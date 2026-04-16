@@ -51,3 +51,34 @@
 - Reporter paths confirmed: `Prop Scanner/`, `Calibration/`, `P&L/`, `Trading/`
 
 ---
+
+---
+
+## 2026-04-16 — T-36 tanking scanner NO-side fix + 9-round adversarial sprint ship
+
+**Shipped to Mac Mini today:** T-28..T-45 (18 tickets, commit 60d8c97) + T-36 (this session).
+
+### Adversarial review saga
+- 9 rounds of `/codex:adversarial-review` against the trading bot
+- 23 bugs caught: 1 CRITICAL + 13 HIGH + 9 MED, all fixed with regression tests
+- Trend: 4 → 3 → 2 → 2 → 3 → 3 → 2 → 2 → 2 (stabilized at 2/round, not converging to zero)
+- Every round's output translated to `obsidian/00_inbox/codex-adversarial-review-2026-04-16-round{N}.md`
+- **Meta-lesson:** the last 3 rounds found bugs *in the fixes themselves* (T-42 preflight was broken out of the gate in T-43; T-43 preflight's REQUIRED_TABLES missed boot-time writers in T-44; T-44 watchdog killed daemons before verifying schema in T-45). Every new layer needs its own bridge test — we've been systematically adding static regression tests that close each bug class.
+
+### Deploy operational notes
+- Mac Mini `open_positions` column drift on first pull: preflight correctly detected missing `exit_order_id`, returned exit code 4 with ALTER statement. Applied manually.
+- An orphan Streamlit (PID 12479 from Wed) held port 8501 → new dashboard burned `MAX_RESTARTS=10` budget in watchdog → "giving up". Killed orphan + manually relaunched dashboard. T-39 `HEALTHY_RESET_TICKS` will reset the counter after 5 min healthy uptime.
+- Old watchdog (pre-T-42) at the time of auto-pull had no preflight, no kill-children, no exec → pulled new code but no process restarted. Had to manually kill orphan watchdog (PID 13590) + run fresh `start_bot.sh`. One-shot migration debt, future pulls use T-44 preflight gate.
+
+### Background job running on Mac Mini
+- `historical_fetcher` (PID 58977) launched ~14:34 UTC, full fetch (~133k markets). When it completes, run `venv/bin/python -m analytics.calibration_signal --build` to populate `calibration_edges`. Until then the calibration_trader scanner emits zero signals.
+
+### What's still open
+- **T-22 → T-23** MLB threshold tuning — blocked on data collection (scanner needs weeks of `pitcher_signals` to tune)
+- **T-24** tanking hourly backtest — 1-2h work, not blocked
+- **T-25** P&L audit — blocked on closed tanking positions (bot is dry_run, no real fills yet)
+- **T-32** project root cleanup — cosmetic
+- **T-33** MLB in Streamlit — partially done
+
+### Still not settled
+- Adversarial review trend didn't converge to zero in 9 rounds. If we keep going, round 10+ likely finds more — but probably diminishing-value polish at this point.
