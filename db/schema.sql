@@ -63,8 +63,12 @@ CREATE TABLE IF NOT EXISTS price_snapshots (
     PRIMARY KEY (ts, market_id)
 );
 
--- TimescaleDB hypertable
-SELECT create_hypertable('price_snapshots', 'ts', if_not_exists => TRUE);
+-- TimescaleDB hypertable (skipped gracefully if TimescaleDB not installed)
+DO $$ BEGIN
+  PERFORM create_hypertable('price_snapshots', 'ts', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN
+  RAISE NOTICE 'TimescaleDB not installed — price_snapshots will be a regular table';
+END $$;
 
 -- Трейди (Фаза 1)
 CREATE TABLE IF NOT EXISTS trades (
@@ -77,7 +81,11 @@ CREATE TABLE IF NOT EXISTS trades (
     PRIMARY KEY (ts, market_id, trade_id)
 );
 
-SELECT create_hypertable('trades', 'ts', if_not_exists => TRUE);
+DO $$ BEGIN
+  PERFORM create_hypertable('trades', 'ts', if_not_exists => TRUE);
+EXCEPTION WHEN undefined_function THEN
+  RAISE NOTICE 'TimescaleDB not installed — trades will be a regular table';
+END $$;
 
 -- Індекси для аналітики
 CREATE INDEX IF NOT EXISTS idx_snapshots_market ON price_snapshots(market_id, ts);
@@ -172,3 +180,176 @@ CREATE INDEX IF NOT EXISTS idx_tanking_signals_market
     ON tanking_signals (market_id, scanned_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tanking_signals_game_start
     ON tanking_signals (game_start);
+
+-- Trading bot: open positions ledger
+CREATE TABLE IF NOT EXISTS open_positions (
+    id            SERIAL PRIMARY KEY,
+    market_id     TEXT NOT NULL,
+    slug          TEXT,
+    signal_type   TEXT,           -- 'tanking' | 'prop'
+    side          TEXT,           -- 'YES' | 'NO'
+    token_id      TEXT,           -- ERC-1155 YES token ID from markets table
+    size_usd      NUMERIC(10,2),
+    size_shares   NUMERIC(12,4),
+    entry_price   NUMERIC(8,4),
+    entry_ts      TIMESTAMPTZ DEFAULT NOW(),
+    game_start    TIMESTAMPTZ,
+    status        TEXT DEFAULT 'open',  -- open | closed | cancelled
+    exit_price    NUMERIC(8,4),
+    exit_ts       TIMESTAMPTZ,
+    pnl_usd       NUMERIC(10,2),
+    clob_order_id TEXT,
+    fill_status   TEXT DEFAULT 'pending',  -- pending | filled | exit_pending | cancelled | force_cancelled | timed_out | repricing | stale
+    current_bid   FLOAT,                   -- latest market bid, refreshed by stop-loss monitor (used for unrealized P&L)
+    exit_order_id TEXT,                    -- T-35: CLOB order id of the SELL placed by stop-loss/take-profit; order_poller finalizes
+    notes         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_open_positions_market
+    ON open_positions (market_id, status);
+
+-- Cross-sport real-time drift monitor (T-30)
+-- Flags markets that drift > N% over the lookback window without a coincident
+-- spike event. action = 'WATCH' — drift alone is not tradeable, just a heads-up.
+CREATE TABLE IF NOT EXISTS drift_signals (
+    id              SERIAL PRIMARY KEY,
+    scanned_at      TIMESTAMPTZ DEFAULT NOW(),
+    market_id       TEXT NOT NULL,
+    sport           TEXT,
+    game_start      TIMESTAMPTZ,
+    current_price   FLOAT,
+    past_price      FLOAT,           -- price at lookback_hours ago
+    lookback_hours  FLOAT,           -- e.g. 6.0
+    drift_pct       FLOAT,           -- (current - past) / past * 100, signed
+    direction       TEXT,            -- UP / DOWN
+    has_spike       BOOLEAN DEFAULT FALSE,  -- true if a spike_event landed inside the window
+    action          TEXT,            -- WATCH
+    notes           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_drift_signals_market
+    ON drift_signals (market_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_drift_signals_game_start
+    ON drift_signals (game_start);
+
+-- Spike follow signals (T-31) — derived from collector spike_events
+CREATE TABLE IF NOT EXISTS spike_signals (
+    id              SERIAL PRIMARY KEY,
+    scanned_at      TIMESTAMPTZ DEFAULT NOW(),
+    spike_event_id  BIGINT REFERENCES spike_events(id),
+    market_id       TEXT NOT NULL,
+    sport           TEXT,
+    game_start      TIMESTAMPTZ,
+    direction       TEXT,            -- 'up' / 'down' (matches spike_events.direction)
+    magnitude       FLOAT,
+    n_steps         INT,
+    entry_price     FLOAT,           -- end_price of the spike (where to enter)
+    action          TEXT,            -- BUY / WATCH
+    notes           TEXT,
+    traded          BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_spike_signals_market
+    ON spike_signals (market_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_spike_signals_event
+    ON spike_signals (spike_event_id);
+
+-- NBA injury signals (key player OUT/DOUBTFUL → opponent BUY)
+CREATE TABLE IF NOT EXISTS injury_signals (
+    id              SERIAL PRIMARY KEY,
+    scanned_at      TIMESTAMPTZ DEFAULT NOW(),
+    market_id       TEXT NOT NULL,
+    game_start      TIMESTAMPTZ,
+    injured_team    TEXT,
+    healthy_team    TEXT,
+    player_name     TEXT,
+    status          TEXT,           -- OUT / DOUBTFUL / QUESTIONABLE / GTD
+    current_price   FLOAT,
+    drift_24h       FLOAT,
+    action          TEXT,           -- BUY / WATCH
+    notes           TEXT,
+    traded          BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_injury_signals_market
+    ON injury_signals (market_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_injury_signals_game_start
+    ON injury_signals (game_start);
+
+-- MLB pitcher signals (starting pitcher mismatch opportunities)
+CREATE TABLE IF NOT EXISTS pitcher_signals (
+    id                   SERIAL PRIMARY KEY,
+    scanned_at           TIMESTAMPTZ DEFAULT NOW(),
+    market_id            TEXT NOT NULL,
+    game_start           TIMESTAMPTZ,
+    favored_team         TEXT,
+    underdog_team        TEXT,
+    home_pitcher         TEXT,
+    home_era             FLOAT,
+    away_pitcher         TEXT,
+    away_era             FLOAT,
+    era_differential     FLOAT,
+    quality_differential FLOAT,
+    current_price        FLOAT,
+    drift_24h            FLOAT,
+    signal_strength      TEXT,    -- HIGH / MODERATE / WATCH
+    action               TEXT,    -- BUY / SELL / CLOSE / WATCH / NO MARKET
+    traded               BOOLEAN DEFAULT FALSE
+);
+CREATE INDEX IF NOT EXISTS idx_pitcher_signals_market
+    ON pitcher_signals (market_id, scanned_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pitcher_signals_game_start
+    ON pitcher_signals (game_start);
+
+-- Historical market outcomes + pre-game prices (populated by historical_fetcher.py)
+-- Used by calibration_analyzer + calibration_signal --build
+CREATE TABLE IF NOT EXISTS historical_calibration (
+    market_id     TEXT PRIMARY KEY,
+    slug          TEXT,
+    sport         TEXT,
+    market_type   TEXT,           -- moneyline | spreads | totals | unknown
+    game_start    TIMESTAMPTZ,
+    outcome       SMALLINT,       -- 1 = YES won, 0 = NO won, NULL = unresolved
+    price_close   FLOAT,          -- last snapshot before game_start
+    price_pre1h   FLOAT,
+    price_pre2h   FLOAT,
+    price_pre6h   FLOAT,
+    price_pre12h  FLOAT,
+    price_pre24h  FLOAT,
+    price_pre48h  FLOAT,
+    n_price_pts   INT DEFAULT 0,
+    fetched_at    TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_historical_calibration_sport
+    ON historical_calibration (sport, market_type);
+
+-- Calibration edges — persistent lookup table of systematic pricing biases per
+-- (sport, market_type, price tier). Built offline by calibration_signal --build,
+-- consumed online by the trading bot's calibration_scan.
+CREATE TABLE IF NOT EXISTS calibration_edges (
+    sport        TEXT NOT NULL,
+    market_type  TEXT NOT NULL,        -- moneyline | spreads | totals | any
+    price_lo     FLOAT NOT NULL,       -- bucket lower bound (inclusive)
+    price_hi     FLOAT NOT NULL,       -- bucket upper bound (exclusive)
+    avg_price    FLOAT NOT NULL,       -- average historical mid_price within this bucket
+    actual_win_rate FLOAT NOT NULL,    -- fraction of YES resolutions observed
+    edge_pct     FLOAT NOT NULL,       -- (actual_win_rate - avg_price) * 100
+    direction    TEXT NOT NULL,        -- YES (underpriced) / NO (overpriced)
+    n            INT NOT NULL,         -- sample size in the bucket
+    confidence   TEXT NOT NULL,        -- HIGH (n>=50) / MEDIUM (n>=20) / LOW
+    updated_at   TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (sport, market_type, price_lo)
+);
+CREATE INDEX IF NOT EXISTS idx_calibration_edges_sport
+    ON calibration_edges (sport, confidence, edge_pct DESC);
+
+-- Trading bot: full order audit log
+CREATE TABLE IF NOT EXISTS order_log (
+    id            SERIAL PRIMARY KEY,
+    market_id     TEXT NOT NULL,
+    position_id   INTEGER REFERENCES open_positions(id),
+    action        TEXT,           -- 'buy' | 'sell' | 'cancel'
+    clob_order_id TEXT,
+    price         NUMERIC(8,4),
+    size_usd      NUMERIC(10,2),
+    status        TEXT,           -- pending | filled | cancelled | rejected
+    created_at    TIMESTAMPTZ DEFAULT NOW(),
+    filled_at     TIMESTAMPTZ,
+    raw_response  TEXT
+);

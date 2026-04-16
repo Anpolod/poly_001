@@ -256,14 +256,17 @@ async def scan(
 
                 candidates.append((m, event))
 
-        # Fetch orderbooks concurrently
+        # Fetch orderbooks concurrently (max 15 parallel to avoid rate-limiting)
+        _sem = asyncio.Semaphore(15)
+
         async def _enrich(m: dict, _event: dict) -> Optional[PropOpportunity]:
             token_raw = m.get("clobTokenIds", "[]")
             tokens = json.loads(token_raw) if isinstance(token_raw, str) else token_raw
             if not tokens:
                 return None
 
-            book = await _fetch_orderbook(session, clob_url, tokens[0])
+            async with _sem:
+                book = await _fetch_orderbook(session, clob_url, tokens[0])
             bids = book.get("bids", [])
             asks = book.get("asks", [])
 

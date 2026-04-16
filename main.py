@@ -80,13 +80,39 @@ class Collector:
 
         self._running = True
 
-        # Launch parallel tasks
-        await asyncio.gather(
-            self._snapshot_loop(),
-            self._market_rescan_loop(),
-            self._heartbeat_loop(),
-            self.ws.start(),
-        )
+        # T-37 — supervise the 4 never-ending loops via asyncio.wait with
+        # FIRST_EXCEPTION semantics. If any loop dies we log it, cancel the
+        # surviving tasks, and return; watchdog.sh will restart the collector.
+        # This replaces a previous gather(return_exceptions=True) design that
+        # never surfaced failures because those loops never finish normally.
+        tasks = {
+            asyncio.create_task(self._snapshot_loop(),      name="snapshot_loop"),
+            asyncio.create_task(self._market_rescan_loop(), name="market_rescan_loop"),
+            asyncio.create_task(self._heartbeat_loop(),     name="heartbeat_loop"),
+            asyncio.create_task(self.ws.start(),            name="ws_start"),
+        }
+
+        try:
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_EXCEPTION
+            )
+            for t in done:
+                exc = t.exception()
+                if exc is not None:
+                    logger.error(
+                        "Collector task %s died — triggering shutdown: %r",
+                        t.get_name(), exc,
+                    )
+                else:
+                    logger.warning(
+                        "Collector task %s finished unexpectedly (no exception)",
+                        t.get_name(),
+                    )
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def stop(self):
         """Gracefully stop the collector and close all connections."""
@@ -164,42 +190,62 @@ class Collector:
             now = datetime.now(timezone.utc)
 
             for mid, info in list(self.active_markets.items()):
-                # Skip events that have already started
-                tte = compute_time_to_event(info["event_start"])
-                if tte < 0:
-                    await self.repo.update_market_status(mid, "settled")
-                    await self.alert.market_settled(mid, info.get("slug", ""))
-                    del self.active_markets[mid]
-                    continue
+                # T-34: any single market's work is isolated. One failing DB
+                # insert (e.g. Postgres momentarily unavailable) logs and moves
+                # on instead of crashing the whole snapshot loop.
+                try:
+                    # Skip events that have already started
+                    tte = compute_time_to_event(info["event_start"])
+                    if tte < 0:
+                        try:
+                            await self.repo.update_market_status(mid, "settled")
+                            await self.alert.market_settled(mid, info.get("slug", ""))
+                        except Exception as exc:
+                            logger.warning("Failed to settle %s: %r", mid, exc)
+                        self.active_markets.pop(mid, None)
+                        continue
 
-                token_id = info.get("token_id_yes")
-                if not token_id:
-                    continue
+                    token_id = info.get("token_id_yes")
+                    if not token_id:
+                        continue
 
-                # Check for data gap
-                last_snap = self._last_snapshots.get(mid)
-                if last_snap:
-                    gap_min = (now - last_snap).total_seconds() / 60
-                    if gap_min > gap_threshold:
-                        await self.alert.gap_detected(mid, gap_min)
-                        await self.repo.insert_gap(mid, last_snap, "snapshot_delay")
+                    # Check for data gap — gap insert is best-effort
+                    last_snap = self._last_snapshots.get(mid)
+                    if last_snap:
+                        gap_min = (now - last_snap).total_seconds() / 60
+                        if gap_min > gap_threshold:
+                            try:
+                                await self.alert.gap_detected(mid, gap_min)
+                                await self.repo.insert_gap(mid, last_snap, "snapshot_delay")
+                            except Exception as exc:
+                                logger.warning("Gap insert failed for %s: %r", mid, exc)
 
-                # Fetch orderbook
-                orderbook = await self.rest.get_orderbook(token_id)
-                if not orderbook:
-                    continue
+                    # Fetch orderbook
+                    orderbook = await self.rest.get_orderbook(token_id)
+                    if not orderbook:
+                        continue
 
-                # Attach volume from market info (REST doesn't always return it)
-                orderbook["volume_24h"] = info.get("volume_24h", 0)
+                    # Attach volume from market info (REST doesn't always return it)
+                    orderbook["volume_24h"] = info.get("volume_24h", 0)
 
-                # Normalise and save
-                snapshot = normalize_snapshot(mid, orderbook, info["event_start"])
-                await self.repo.insert_snapshot(snapshot)
-                self._last_snapshots[mid] = now
+                    # Normalise and save
+                    snapshot = normalize_snapshot(mid, orderbook, info["event_start"])
+                    await self.repo.insert_snapshot(snapshot)
+                    self._last_snapshots[mid] = now
 
-                if orderbook.get("mid_price") and orderbook.get("spread"):
-                    await self.alert.snapshot_saved(
-                        mid, orderbook["mid_price"], orderbook["spread"]
+                    if orderbook.get("mid_price") and orderbook.get("spread"):
+                        try:
+                            await self.alert.snapshot_saved(
+                                mid, orderbook["mid_price"], orderbook["spread"]
+                            )
+                        except Exception:
+                            pass  # alert failures are non-critical
+
+                except Exception as exc:
+                    # Swallow and log — keep the loop alive for the next market
+                    logger.warning(
+                        "Snapshot loop: skipping %s due to %s: %r",
+                        info.get("slug") or mid, type(exc).__name__, exc,
                     )
 
             # Wait until the next cycle

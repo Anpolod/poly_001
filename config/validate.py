@@ -27,6 +27,33 @@ _REQUIRED: list[tuple[str, Any, str]] = [
     ("collector.ws_reconnect_max_delay",       (int, float), "WS reconnect max delay (seconds)"),
 ]
 
+# Trading keys — only validated when trading.enabled is present (bot mode).
+# Collector-only runs don't need these.
+_TRADING_REQUIRED: list[tuple[str, Any, str]] = [
+    ("trading.budget_usd",               (int, float), "Total USDC budget"),
+    ("trading.max_position_pct",         (int, float), "Max position size as % of budget"),
+    ("trading.max_total_exposure_pct",   (int, float), "Max total open exposure as % of budget"),
+    ("trading.stop_loss_pct",            (int, float), "Stop-loss threshold (%)"),
+    ("trading.daily_loss_limit_usd",     (int, float), "Circuit breaker daily loss limit ($)"),
+    ("trading.max_positions_per_game",   int,          "Max simultaneous positions per game"),
+    ("trading.max_positions_per_sport",  int,          "Max simultaneous positions per sport"),
+    ("trading.scan_interval_sec",        (int, float), "Signal scan interval (seconds)"),
+    ("trading.confirm_timeout_sec",      (int, float), "Telegram confirm timeout (seconds)"),
+    ("trading.exit_minutes_before",      (int, float), "Minutes before game to auto-close"),
+    ("alerts.telegram_bot_token",        str,          "Telegram bot token for trading alerts"),
+    ("alerts.telegram_chat_id",          str,          "Telegram chat ID for trading alerts"),
+]
+
+# Numeric bounds: (dotted_key, min_val, max_val, description)
+_BOUNDS: list[tuple[str, float, float, str]] = [
+    ("trading.max_position_pct",        0.1,  100.0, "must be 0.1–100 (%)"),
+    ("trading.max_total_exposure_pct",  1.0,  100.0, "must be 1–100 (%)"),
+    ("trading.stop_loss_pct",           1.0,   99.0, "must be 1–99 (%)"),
+    ("trading.take_profit_pct",         0.0,   99.0, "must be 0–99 (%) — 0 disables"),
+    ("trading.ev_min_scale",            0.01,   1.0, "must be 0.01–1.0"),
+    ("trading.reprice_threshold_pct",   0.1,   50.0, "must be 0.1–50 (%)"),
+]
+
 
 def _get_nested(config: dict, dotted_key: str) -> Any:
     """Traverse nested dict by dotted key. Returns _MISSING sentinel if absent."""
@@ -42,22 +69,16 @@ def _get_nested(config: dict, dotted_key: str) -> Any:
 _MISSING = object()
 
 
-def validate_config(config: dict) -> None:
-    """
-    Check all required config keys exist and have the expected types.
-    Prints all errors at once, then exits with code 1 if any found.
-    """
-    errors: list[str] = []
-
-    for dotted_key, expected_type, description in _REQUIRED:
+def _check_keys(
+    config: dict,
+    keys: list[tuple[str, Any, str]],
+    errors: list[str],
+) -> None:
+    for dotted_key, expected_type, description in keys:
         value = _get_nested(config, dotted_key)
-
         if value is _MISSING:
-            errors.append(
-                f"  MISSING  {dotted_key!r:45s}  — {description}"
-            )
+            errors.append(f"  MISSING     {dotted_key!r:45s}  — {description}")
             continue
-
         if not isinstance(value, expected_type):
             type_name = (
                 " or ".join(t.__name__ for t in expected_type)
@@ -65,9 +86,42 @@ def validate_config(config: dict) -> None:
                 else expected_type.__name__
             )
             errors.append(
-                f"  WRONG TYPE  {dotted_key!r:42s}  — expected {type_name}, "
+                f"  WRONG TYPE  {dotted_key!r:45s}  — expected {type_name}, "
                 f"got {type(value).__name__!r} ({value!r})"
             )
+
+
+def validate_config(config: dict) -> None:
+    """
+    Check all required config keys exist and have the expected types.
+    When trading.enabled is true, also validates trading-specific keys and bounds.
+    Prints all errors at once, then exits with code 1 if any found.
+    """
+    errors: list[str] = []
+
+    _check_keys(config, _REQUIRED, errors)
+
+    # Extra checks only when bot is in trading mode
+    trading_enabled = _get_nested(config, "trading.enabled")
+    if trading_enabled is not _MISSING and trading_enabled:
+        _check_keys(config, _TRADING_REQUIRED, errors)
+
+        for dotted_key, lo, hi, note in _BOUNDS:
+            value = _get_nested(config, dotted_key)
+            if value is _MISSING or not isinstance(value, (int, float)):
+                continue   # type error already reported above
+            if not (lo <= float(value) <= hi):
+                errors.append(
+                    f"  OUT OF RANGE  {dotted_key!r:43s}  — {note} (got {value})"
+                )
+
+        # Warn (non-fatal) if token/chat_id placeholders are still empty
+        for key in ("alerts.telegram_bot_token", "alerts.telegram_chat_id"):
+            val = _get_nested(config, key)
+            if val is not _MISSING and not str(val).strip():
+                errors.append(
+                    f"  EMPTY  {key!r:49s}  — required for trading mode"
+                )
 
     if errors:
         print("CONFIG ERROR — fix config/settings.yaml before starting:\n")

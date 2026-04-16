@@ -3,7 +3,7 @@ RUFF   := venv/bin/ruff
 MYPY   := venv/bin/mypy
 PYTEST := venv/bin/pytest
 
-.PHONY: lint format typecheck test fix all dashboard obsidian scanner-once scanner-daemon tanking tanking-backtest
+.PHONY: lint format typecheck test fix all dashboard obsidian obsidian-trading scanner-once scanner-daemon tanking tanking-backtest signals trading start stop status logs
 
 ## Start Streamlit dashboard (http://localhost:8501)
 dashboard:
@@ -45,6 +45,71 @@ tanking:
 ## Run tanking backtest on collected snapshots
 tanking-backtest:
 	$(PYTHON) -m analytics.tanking_scanner --backtest
+
+## Scan upcoming MLB games for pitcher mismatches
+mlb:
+	$(PYTHON) -m analytics.mlb_pitcher_scanner
+
+## MLB pitcher scanner in watch mode (refresh every 30 min)
+mlb-watch:
+	$(PYTHON) -m analytics.mlb_pitcher_scanner --watch --save
+
+## Send signal digest to Telegram (prop + tanking)
+signals:
+	$(PYTHON) scripts/send_signals.py
+
+## Start trading bot (requires .env with POLYGON_PRIVATE_KEY, trading.enabled: true)
+trading:
+	$(PYTHON) -m trading.bot_main
+
+## Start bot + dashboard + watchdog in background (Mac mini)
+start:
+	bash scripts/start_bot.sh
+
+## Stop all background services
+stop:
+	bash scripts/stop_bot.sh
+
+## Show running PIDs and last 20 log lines
+status:
+	@echo "=== Process status ==="
+	@for svc in bot dashboard watchdog; do \
+	  pidfile=logs/$$svc.pid; \
+	  if [ -f $$pidfile ]; then \
+	    pid=$$(cat $$pidfile); \
+	    if kill -0 $$pid 2>/dev/null; then \
+	      echo "  $$svc: running (PID $$pid)"; \
+	    else \
+	      echo "  $$svc: DEAD (stale PID $$pid)"; \
+	    fi; \
+	  else \
+	    echo "  $$svc: not started"; \
+	  fi; \
+	done
+	@echo ""
+	@echo "=== Last 20 lines (bot.log) ==="
+	@tail -20 logs/bot.log 2>/dev/null || echo "  (no log yet)"
+
+## Tail bot log live
+logs:
+	tail -f logs/bot.log
+
+## Generate Obsidian trading diary + summary
+obsidian-trading:
+	$(PYTHON) -m analytics.obsidian_reporter --report trading
+
+## Export dashboard data (DB → JSON) once
+dashboard-export:
+	$(PYTHON) dashboard/export_dashboard_data.py
+
+## Export dashboard data continuously (every 60s)
+dashboard-export-watch:
+	$(PYTHON) dashboard/export_dashboard_data.py --watch
+
+## Serve HTML dashboard (auto-refreshes from dashboard_data.json)
+dashboard-html:
+	@echo "Open http://localhost:8080/stats_dashboard.html"
+	cd dashboard && $(PYTHON) -m http.server 8080
 
 ## Run lint + typecheck + test
 all: lint typecheck test

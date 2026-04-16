@@ -124,6 +124,13 @@ python -m analytics.tanking_scanner --watch                   # refresh every 30
 python -m analytics.tanking_scanner --save                    # persist to tanking_signals table
 make tanking                                                   # convenience alias
 make tanking-backtest
+
+# MLB pitcher scanner — find starting pitcher mismatches
+python -m analytics.mlb_pitcher_scanner                           # scan next 48h games
+python -m analytics.mlb_pitcher_scanner --min-era-diff 1.5        # only significant mismatches
+python -m analytics.mlb_pitcher_scanner --hours 24                # next 24h only
+python -m analytics.mlb_pitcher_scanner --watch                   # refresh every 30 min
+python -m analytics.mlb_pitcher_scanner --save                    # persist to pitcher_signals table
 ```
 
 ## Architecture

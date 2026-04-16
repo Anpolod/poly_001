@@ -20,6 +20,18 @@ def render() -> None:
     st.title("Overview")
     st.caption("Polymarket Sports — market universe at a glance")
 
+    # ── Trading summary ───────────────────────────────────────────────────
+    ts = db.trading_summary()
+    if ts:
+        pnl_color = "normal" if ts["today_pnl"] >= 0 else "inverse"
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Open Positions", ts["open_cnt"])
+        c2.metric("Open Exposure", f"${ts['exposure']:.2f}")
+        c3.metric("P&L Today", f"${ts['today_pnl']:+.2f}", delta_color=pnl_color)
+        c4.metric("All-time P&L", f"${ts['alltime_pnl']:+.2f}")
+        c5.metric("Win Rate", ts["win_rate"])
+        st.divider()
+
     # ── Snapshot heartbeat ────────────────────────────────────────────────
     rate = db.snapshot_rate_last_hour()
     if rate:

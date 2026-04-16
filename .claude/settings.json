@@ -73,7 +73,9 @@
       "Bash(venv/bin/pytest -v --tb=short)",
       "Bash(venv/bin/python -m analytics.backtester --min-snapshots 100 --output bt_results.csv)",
       "Bash(venv/bin/python -m analytics.calibration_analyzer --output calibration.csv)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Read(//tmp/claude-wiki-compile/**)",
+      "Read(//private/tmp/claude-wiki-compile/**)"
     ],
     "additionalDirectories": [
       "/Users/andriipolodiienko/Documents/dev/projects/polymarket-sports/.claude/skills"

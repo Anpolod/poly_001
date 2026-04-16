@@ -1,0 +1,126 @@
+# config/mlb_team_aliases.yaml
+# Maps Polymarket question fragments → canonical ESPN displayName
+# Keys must be lowercase substrings that appear in market questions.
+# Values must match ESPN "displayName" exactly.
+
+# AL East
+"yankees": "New York Yankees"
+"new york yankees": "New York Yankees"
+"ny yankees": "New York Yankees"
+
+"red sox": "Boston Red Sox"
+"boston red sox": "Boston Red Sox"
+
+"blue jays": "Toronto Blue Jays"
+"toronto blue jays": "Toronto Blue Jays"
+"toronto": "Toronto Blue Jays"
+
+"orioles": "Baltimore Orioles"
+"baltimore orioles": "Baltimore Orioles"
+"baltimore": "Baltimore Orioles"
+
+"rays": "Tampa Bay Rays"
+"tampa bay rays": "Tampa Bay Rays"
+"tampa bay": "Tampa Bay Rays"
+
+# AL Central
+"guardians": "Cleveland Guardians"
+"cleveland guardians": "Cleveland Guardians"
+"cleveland": "Cleveland Guardians"
+
+"twins": "Minnesota Twins"
+"minnesota twins": "Minnesota Twins"
+"minnesota": "Minnesota Twins"
+
+"white sox": "Chicago White Sox"
+"chicago white sox": "Chicago White Sox"
+
+"royals": "Kansas City Royals"
+"kansas city royals": "Kansas City Royals"
+"kansas city": "Kansas City Royals"
+
+"tigers": "Detroit Tigers"
+"detroit tigers": "Detroit Tigers"
+"detroit": "Detroit Tigers"
+
+# AL West
+"astros": "Houston Astros"
+"houston astros": "Houston Astros"
+"houston": "Houston Astros"
+
+"rangers": "Texas Rangers"
+"texas rangers": "Texas Rangers"
+
+"mariners": "Seattle Mariners"
+"seattle mariners": "Seattle Mariners"
+"seattle": "Seattle Mariners"
+
+"athletics": "Oakland Athletics"
+"oakland athletics": "Oakland Athletics"
+"oakland": "Oakland Athletics"
+"a's": "Oakland Athletics"
+
+"angels": "Los Angeles Angels"
+"los angeles angels": "Los Angeles Angels"
+"la angels": "Los Angeles Angels"
+
+# NL East
+"braves": "Atlanta Braves"
+"atlanta braves": "Atlanta Braves"
+"atlanta": "Atlanta Braves"
+
+"mets": "New York Mets"
+"new york mets": "New York Mets"
+"ny mets": "New York Mets"
+
+"phillies": "Philadelphia Phillies"
+"philadelphia phillies": "Philadelphia Phillies"
+
+"marlins": "Miami Marlins"
+"miami marlins": "Miami Marlins"
+"miami": "Miami Marlins"
+
+"nationals": "Washington Nationals"
+"washington nationals": "Washington Nationals"
+"washington": "Washington Nationals"
+
+# NL Central
+"brewers": "Milwaukee Brewers"
+"milwaukee brewers": "Milwaukee Brewers"
+
+"cubs": "Chicago Cubs"
+"chicago cubs": "Chicago Cubs"
+
+"cardinals": "St. Louis Cardinals"
+"st. louis cardinals": "St. Louis Cardinals"
+"st louis cardinals": "St. Louis Cardinals"
+
+"reds": "Cincinnati Reds"
+"cincinnati reds": "Cincinnati Reds"
+"cincinnati": "Cincinnati Reds"
+
+"pirates": "Pittsburgh Pirates"
+"pittsburgh pirates": "Pittsburgh Pirates"
+"pittsburgh": "Pittsburgh Pirates"
+
+# NL West
+"dodgers": "Los Angeles Dodgers"
+"los angeles dodgers": "Los Angeles Dodgers"
+"la dodgers": "Los Angeles Dodgers"
+
+"padres": "San Diego Padres"
+"san diego padres": "San Diego Padres"
+"san diego": "San Diego Padres"
+
+"giants": "San Francisco Giants"
+"san francisco giants": "San Francisco Giants"
+"san francisco": "San Francisco Giants"
+
+"diamondbacks": "Arizona Diamondbacks"
+"arizona diamondbacks": "Arizona Diamondbacks"
+"arizona": "Arizona Diamondbacks"
+"d-backs": "Arizona Diamondbacks"
+
+"rockies": "Colorado Rockies"
+"colorado rockies": "Colorado Rockies"
+"colorado": "Colorado Rockies"

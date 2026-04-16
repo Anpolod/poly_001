@@ -34,3 +34,7 @@ spike_drift_report.csv
 
 # Compiled KB raw conversation digests (privacy: contain raw conversation content)
 obsidian/_compiled/_raw/
+
+# Obsidian operator-local state (not portable across machines)
+.obsidian/community-plugins.json
+.obsidian/plugins/

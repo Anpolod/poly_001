@@ -145,7 +145,7 @@ def autodetect_projects() -> dict:
 # ---------------------------------------------------------------------------
 # JSONL parsing
 # ---------------------------------------------------------------------------
-def parse_jsonl_message(line_obj: dict) -> dict | None:
+def parse_jsonl_message(line_obj: dict) -> "dict | None":
     """Convert one JSONL line dict into a clean message dict, or None to skip."""
     msg_type = line_obj.get("type")
     if msg_type not in KEEP_MESSAGE_TYPES:

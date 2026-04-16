@@ -4,39 +4,81 @@
     "type": "split",
     "children": [
       {
-        "id": "197d018b340491f6",
-        "type": "tabs",
+        "id": "f132825ba91473c0",
+        "type": "split",
         "children": [
           {
-            "id": "86eafd25e968ea68",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "README.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "README"
-            }
+            "id": "197d018b340491f6",
+            "type": "tabs",
+            "dimension": 67.38754325259517,
+            "children": [
+              {
+                "id": "daeb3cfe8b5109c2",
+                "type": "leaf",
+                "state": {
+                  "type": "markdown",
+                  "state": {
+                    "file": "obsidian/Instructions/mac-mini-transfer.md",
+                    "mode": "source",
+                    "source": false
+                  },
+                  "icon": "lucide-file",
+                  "title": "mac-mini-transfer"
+                }
+              }
+            ]
           },
           {
-            "id": "332f42d6a81e70a0",
-            "type": "leaf",
-            "state": {
-              "type": "markdown",
-              "state": {
-                "file": "TASKS.md",
-                "mode": "source",
-                "source": false
-              },
-              "icon": "lucide-file",
-              "title": "TASKS"
-            }
+            "id": "51225b3ac4d251d6",
+            "type": "tabs",
+            "dimension": 32.61245674740484,
+            "children": [
+              {
+                "id": "fdd416c5c09e10f8",
+                "type": "leaf",
+                "pinned": true,
+                "state": {
+                  "type": "terminal:terminal",
+                  "state": {
+                    "terminal:terminal": {
+                      "cwd": "/Users/andriipolodiienko/Documents/dev/projects/polymarket-sports",
+                      "focus": false,
+                      "profile": {
+                        "args": [
+                          "--login"
+                        ],
+                        "executable": "/bin/zsh",
+                        "followTheme": true,
+                        "name": "",
+                        "platforms": {
+                          "darwin": true
+                        },
+                        "pythonExecutable": "python3",
+                        "restoreHistory": false,
+                        "rightClickAction": "copyPaste",
+                        "successExitCodes": [
+                          "0",
+                          "SIGINT",
+                          "SIGTERM"
+                        ],
+                        "terminalOptions": {
+                          "documentOverride": null
+                        },
+                        "type": "integrated",
+                        "useWin32Conhost": true
+                      },
+                      "serial": null
+                    }
+                  },
+                  "pinned": true,
+                  "icon": "terminal",
+                  "title": "Terminal: zsh"
+                }
+              }
+            ]
           }
         ],
-        "currentTab": 1
+        "direction": "horizontal"
       }
     ],
     "direction": "vertical"
@@ -195,27 +237,48 @@
       "daily-notes:Open today's daily note": false,
       "templates:Insert template": false,
       "command-palette:Open command palette": false,
-      "bases:Create new base": false
+      "bases:Create new base": false,
+      "terminal:Open terminal": false
     }
   },
-  "active": "332f42d6a81e70a0",
+  "active": "3d3b4af0a0e702a2",
   "lastOpenFiles": [
-    "README.md",
-    "PROJECT_STATE.md",
-    "obsidian/Calibration/player-props.md",
-    "polymarket-inspect.json",
-    "pg-asap-inspect.json",
-    "pg_asap_backup.dump",
-    "polymarket_backup.sql",
-    "pg_asap_backup.sql",
-    "obsidian/Prop Scanner/2026-04-05.md",
+    "Untitled",
+    "dashboard/export_dashboard_data.py",
+    "dashboard/stats_dashboard.html",
+    "collector/__pycache__/mlb_data.cpython-314.pyc",
+    "analytics/__pycache__/mlb_pitcher_scanner.cpython-314.pyc",
+    "collector/__pycache__/mlb_data.cpython-310.pyc",
+    "analytics/mlb_pitcher_scanner.py",
+    "config/mlb_team_aliases.yaml",
+    "collector/mlb_data.py",
+    "obsidian/Strategies/prematch-drift.md",
+    "obsidian/Strategies/mlb-pitcher.md",
+    "obsidian/Strategies/prop-scanner.md",
+    "obsidian/Strategies/tanking.md",
+    "obsidian/Strategies/README.md",
+    "obsidian/Strategies",
+    "obsidian/00_inbox/tanking-pattern-analysis.md",
+    "obsidian/_compiled/_raw/2026-04-14-polymarket-sports.md",
+    "obsidian/_compiled/_raw/2026-04-13-polymarket-sports.md",
     "obsidian/P&L/tracker.md",
+    "Untitled.base",
+    "obsidian/Trading/README.md",
+    "obsidian/00_inbox/session-log.md",
+    "obsidian/INDEX.md",
+    "obsidian/Instructions/mac-mini-transfer.md",
+    "obsidian/Instructions/roadmap-4-strategies.md",
     "TASKS.md",
-    "phase0_report.md",
-    "phase0_fixes_report.md",
     "Analysis.md",
-    "Untitled.md",
-    "Untitled.canvas",
-    "CLAUDE.md"
+    "obsidian/Instructions/mac-mini-deploy.md",
+    "README.md",
+    "obsidian/_compiled/_raw/2026-04-04-polymarket-sports.md",
+    "obsidian/_compiled/_raw/2026-04-03-polymarket-sports.md",
+    "obsidian/_compiled/_raw/2026-04-12-polymarket-sports.md",
+    "obsidian/_compiled/log.md",
+    "obsidian/_compiled/index.md",
+    "obsidian/_compiled/README.md",
+    "obsidian/Prop Scanner/2026-04-05.md",
+    "Untitled.canvas"
   ]
 }

@@ -1,3 +1,4 @@
+py-clob-client>=0.34
 streamlit>=1.30.0
 psycopg2-binary>=2.9
 plotly>=5.20

@@ -51,6 +51,25 @@ from analytics.tanking_scanner import (  # noqa: E402
     load_aliases,
     scan_tanking_patterns,
 )
+from analytics.injury_scanner import (  # noqa: E402
+    InjurySignal,
+    build_injury_signals,
+    persist_signals as persist_injury_signals,
+)
+from analytics.calibration_signal import (  # noqa: E402
+    CalibrationSignal,
+    scan as calibration_scan,
+)
+from analytics.drift_monitor import (  # noqa: E402
+    DriftSignal,
+    persist_signals as persist_drift_signals,
+    scan as drift_scan,
+)
+from analytics.spike_signal import (  # noqa: E402
+    SpikeSignal,
+    persist_signals as persist_spike_signals,
+    scan as spike_scan,
+)
 from analytics.mlb_pitcher_scanner import (  # noqa: E402
     PitcherSignal,
     load_mlb_aliases,
@@ -68,6 +87,7 @@ from trading.position_manager import (  # noqa: E402
     has_position,
     log_order,
     open_position,
+    resolve_team_token_side,
 )
 from trading.risk_manager import can_open, position_size_by_ev, tanking_roi_estimate  # noqa: E402
 from trading.telegram_confirm import (  # noqa: E402
@@ -116,6 +136,22 @@ def _mark_skipped(market_id: str, hours: float = _SKIP_TTL_HOURS) -> None:
 _STATE_FILE = _ROOT / "logs" / "bot_state.json"
 _last_low_balance_alert: datetime | None = None
 _LOW_BALANCE_ALERT_INTERVAL_H = 2.0   # don't spam more than once per 2 hours
+
+# Injury scanner runs on its own cadence (default 10 min) inside the main loop
+_last_injury_scan: datetime | None = None
+_injury_alerted: dict[str, datetime] = {}  # market_id -> last alert ts (Telegram dedupe)
+
+# Calibration trader cadence (default 60 min) + per-market dedupe for alerts
+_last_calibration_scan: datetime | None = None
+_calibration_alerted: dict[str, datetime] = {}
+
+# Drift monitor cadence (default 15 min) + per-market 6h dedupe
+_last_drift_scan: datetime | None = None
+_drift_alerted: dict[str, datetime] = {}
+
+# Spike follow cadence (default 5 min) + per-spike-event dedupe (one alert per event)
+_last_spike_scan: datetime | None = None
+_spike_alerted: set[int] = set()
 
 
 def _write_bot_state(balance: float, trading_enabled: bool) -> None:
@@ -190,6 +226,21 @@ async def _get_token_id(pool: asyncpg.Pool, market_id: str) -> str:
         "SELECT token_id_yes FROM markets WHERE id=$1", market_id
     )
     return row["token_id_yes"] if row and row["token_id_yes"] else ""
+
+
+def _is_buy_rejected(order: dict) -> tuple[bool, str]:
+    """Round-5 guard: detect a CLOB BUY rejection (no exchange order id).
+
+    Returns (rejected, reason). Callers must NOT persist an open_position row
+    when rejected=True — the order_poller treats empty clob_order_id as
+    "retry the buy", which would turn a hard rejection (insufficient balance,
+    auth error, venue reject) into a ghost position plus infinite retries.
+    """
+    order_id = order.get("order_id") or ""
+    if order_id:
+        return False, ""
+    reason = order.get("error") or order.get("status") or "unknown"
+    return True, str(reason)
 
 
 async def _process_tanking_signal(
@@ -284,6 +335,18 @@ async def _process_tanking_signal(
 
     # Place order
     order = await executor.buy(token_id, trade_price, size_usd)
+
+    rejected, reason = _is_buy_rejected(order)
+    if rejected:
+        await log_order(pool, signal.market_id, None, "buy_rejected", order)
+        logger.error("BUY rejected for %s: %s", signal.motivated_team, reason)
+        await send_error_alert(
+            tg_token, tg_chat_id,
+            f"BUY rejected for {signal.motivated_team}: {reason}",
+        )
+        return 0.0
+
+    order_id_str = order["order_id"]
     actual_shares = order.get("size_shares", size_shares)
 
     # Persist
@@ -297,7 +360,7 @@ async def _process_tanking_signal(
         size_shares=actual_shares,
         entry_price=trade_price,
         game_start=signal.game_start,
-        clob_order_id=order.get("order_id", ""),
+        clob_order_id=order_id_str,
         notes=f"motivated={signal.motivated_team} tanking={signal.tanking_team}",
     )
     await log_order(pool, signal.market_id, position_id, "buy", order)
@@ -323,21 +386,60 @@ async def _process_pitcher_signal(
     tg_token: str,
     tg_chat_id: str,
     total_exposure: float,
+    mlb_aliases: dict[str, str],
 ) -> float:
-    """Handle one MLB pitcher mismatch signal. Returns added exposure."""
+    """Handle one MLB pitcher mismatch signal. Returns added exposure.
+
+    T-35 P1.3 — must select the favored team's actual token side. Earlier
+    versions always bought token_id_yes, which silently took the opposite side
+    of the signal whenever the favored team happened to be on Polymarket's NO
+    side. Now: resolve_team_token_side() runs first, and ALL downstream prices
+    (entry filter, sizing, alerts, execution) use the favored-side price.
+    """
     if not signal.market_id:
         return 0.0
 
-    token_id = await _get_token_id(pool, signal.market_id)
+    # ─── T-35: resolve which side the favored team is on (for exec_token_id) ──
+    # We still call resolve_team_token_side here because the scanner only stores
+    # `favored_side` (YES/NO) but not the token id — we need the token id to
+    # submit the order against the correct CLOB side.
+    exec_token_id, resolved_side = await resolve_team_token_side(
+        pool, signal.market_id, signal.favored_team, mlb_aliases
+    )
+    if exec_token_id is None or resolved_side is None:
+        logger.warning(
+            "Skipping MLB %s — could not resolve favored_team side for %s",
+            signal.favored_team, signal.market_id,
+        )
+        return 0.0
+
+    # T-42: signal.current_price is ALREADY side-correct (scanner inverts to
+    # 1 - yes_mid for NO-side favorites before storing). A prior version of
+    # this function flipped it a second time, which produced the underdog's
+    # YES-token price on NO-side markets — wrong for entry filter, sizing,
+    # alerts, and the thin-market fallback order price. Use the signal value
+    # directly. We still verify resolved_side matches signal.favored_side so
+    # a mismatch between scanner-time and execution-time side (e.g. token
+    # remap) is never silently traded on.
+    favored_side = signal.favored_side or resolved_side
+    if signal.favored_side and signal.favored_side != resolved_side:
+        logger.warning(
+            "MLB side mismatch for %s on %s: scanner=%s vs live=%s — skipping",
+            signal.favored_team, signal.market_id,
+            signal.favored_side, resolved_side,
+        )
+        return 0.0
+    favored_price = signal.current_price
+
     min_depth = config["trading"].get("min_ask_depth_usd", 50)
 
+    # Fetch live bid/ask/depth for the FAVORED-side token (not always YES)
     bid, ask, ask_depth_usd = 0.0, 0.0, 0.0
-    if token_id:
-        try:
-            info = await executor.get_market_info(token_id)
-            bid, ask, ask_depth_usd = info["bid"], info["ask"], info["ask_depth_usd"]
-        except Exception:
-            pass
+    try:
+        info = await executor.get_market_info(exec_token_id)
+        bid, ask, ask_depth_usd = info["bid"], info["ask"], info["ask_depth_usd"]
+    except Exception:
+        pass
 
     corr_blocked, corr_reason = await correlation_check(
         pool, config, signal.game_start, signal.market_id
@@ -347,7 +449,7 @@ async def _process_pitcher_signal(
         return 0.0
 
     entry_decision, entry_reason, entry_emoji = check_entry(
-        bid=bid, ask=ask, signal_price=signal.current_price,
+        bid=bid, ask=ask, signal_price=favored_price,
         ask_depth_usd=ask_depth_usd, hours_to_game=signal.hours_to_game,
         min_depth_usd=min_depth,
     )
@@ -360,15 +462,18 @@ async def _process_pitcher_signal(
         logger.info("Skipping MLB %s: %s", signal.favored_team, reason)
         return 0.0
 
-    # Conservative ROI estimate for pitcher signals (lower confidence than tanking)
-    roi_est = max(0.02, signal.era_differential * 0.01)
-    size_usd, size_shares = position_size_by_ev(config, signal.current_price, roi_est)
+    # Conservative ROI estimate for pitcher signals (lower confidence than tanking).
+    # Units must be ROI percent (5.0 = 5%) — position_size_by_ev expects percent,
+    # not fraction. Scale ~10× lower than tanking_roi_estimate (15× per diff unit)
+    # so a 2-point ERA mismatch ≈ 3% and we cap at 15% (half of tanking's 30%).
+    roi_est = min(15.0, max(2.0, signal.era_differential * 1.5))
+    size_usd, size_shares = position_size_by_ev(config, favored_price, roi_est)
 
     h_era = f"{signal.home_pitcher_era:.2f}" if signal.home_pitcher_era else "?"
     a_era = f"{signal.away_pitcher_era:.2f}" if signal.away_pitcher_era else "?"
     extra = (
         f"Market: {entry_emoji} {entry_reason}\n"
-        f"Game in {signal.hours_to_game:.1f}h  |  ERA diff={signal.era_differential:.1f}\n"
+        f"Side: {favored_side}  |  Game in {signal.hours_to_game:.1f}h  |  ERA diff={signal.era_differential:.1f}\n"
         f"Home SP: {signal.home_pitcher_name} ({h_era})\n"
         f"Away SP: {signal.away_pitcher_name} ({a_era})\n"
         f"vs {signal.underdog_team}"
@@ -378,27 +483,31 @@ async def _process_pitcher_signal(
         tg_token, tg_chat_id,
         team_or_player=signal.favored_team,
         signal_type="pitcher",
-        price=signal.current_price,
+        price=favored_price,
         size_usd=size_usd,
         size_shares=size_shares,
         extra_info=extra,
     )
 
     if not config["trading"].get("enabled", False):
-        logger.info("DRY-RUN: would BUY MLB %s @ %.3f  $%.2f (trading disabled)",
-                    signal.favored_team, signal.current_price, size_usd)
+        logger.info("DRY-RUN: would BUY MLB %s (%s side) @ %.3f  $%.2f (trading disabled)",
+                    signal.favored_team, favored_side, favored_price, size_usd)
         return 0.0
 
-    if not token_id:
-        token_id = await _get_token_id(pool, signal.market_id)
-    if not token_id:
-        msg = f"No token_id for MLB market {signal.market_id}. Cannot trade."
-        logger.error(msg)
-        await send_error_alert(tg_token, tg_chat_id, msg)
+    trade_price = ask if (entry_decision == "enter" and ask > 0) else favored_price
+    order = await executor.buy(exec_token_id, trade_price, size_usd)
+
+    rejected, reason = _is_buy_rejected(order)
+    if rejected:
+        await log_order(pool, signal.market_id, None, "buy_rejected", order)
+        logger.error("MLB BUY rejected for %s (%s side): %s", signal.favored_team, favored_side, reason)
+        await send_error_alert(
+            tg_token, tg_chat_id,
+            f"MLB BUY rejected for {signal.favored_team} ({favored_side} side): {reason}",
+        )
         return 0.0
 
-    trade_price = ask if (entry_decision == "enter" and ask > 0) else signal.current_price
-    order = await executor.buy(token_id, trade_price, size_usd)
+    order_id_str = order["order_id"]
     actual_shares = order.get("size_shares", size_shares)
 
     position_id = await open_position(
@@ -406,13 +515,14 @@ async def _process_pitcher_signal(
         market_id=signal.market_id,
         slug=signal.slug,
         signal_type="pitcher",
-        token_id=token_id,
+        token_id=exec_token_id,
         size_usd=size_usd,
         size_shares=actual_shares,
         entry_price=trade_price,
         game_start=signal.game_start,
-        clob_order_id=order.get("order_id", ""),
-        notes=f"favored={signal.favored_team} SP={signal.home_pitcher_name}vs{signal.away_pitcher_name}",
+        clob_order_id=order_id_str,
+        notes=f"favored={signal.favored_team}({favored_side}) SP={signal.home_pitcher_name}vs{signal.away_pitcher_name}",
+        side=favored_side,   # T-38: persist real side (YES or NO) instead of hardcoded YES
     )
     await log_order(pool, signal.market_id, position_id, "buy", order)
     await send_order_confirmation(
@@ -423,8 +533,369 @@ async def _process_pitcher_signal(
         size_usd=size_usd,
         order_id=order.get("order_id", ""),
         status=order.get("status", ""),
+        side=favored_side,   # T-42: real side in message body, not hardcoded YES
     )
     return size_usd
+
+
+async def _run_injury_scan(
+    pool: asyncpg.Pool,
+    http_session,
+    aliases: dict,
+    config: dict,
+    tg_token: str,
+    tg_chat_id: str,
+) -> int:
+    """Scan Rotowire for injuries, persist signals, alert via Telegram.
+
+    Returns number of new BUY signals produced this cycle. Alert-only: does
+    NOT auto-execute (YES/NO mapping to the healthy team varies per market;
+    user confirms manually from the Telegram digest).
+    """
+    global _last_injury_scan
+
+    inj_cfg = config.get("injury_scanner", {})
+    if not inj_cfg.get("enabled", False):
+        return 0
+
+    interval_sec = float(inj_cfg.get("scan_interval_min", 10)) * 60.0
+    now = datetime.now(timezone.utc)
+    if _last_injury_scan is not None:
+        elapsed = (now - _last_injury_scan).total_seconds()
+        if elapsed < interval_sec:
+            return 0
+    _last_injury_scan = now
+
+    statuses_raw = str(inj_cfg.get("statuses", "OUT,DOUBTFUL"))
+    statuses = {s.strip().upper() for s in statuses_raw.split(",") if s.strip()}
+
+    try:
+        signals = await asyncio.wait_for(
+            build_injury_signals(
+                pool, http_session, aliases,
+                hours_window=float(inj_cfg.get("hours_window", 24)),
+                statuses=statuses,
+                max_entry_price=float(inj_cfg.get("max_entry_price", 0.85)),
+            ),
+            timeout=45,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Injury scan timed out — skipping this cycle")
+        return 0
+    except Exception as exc:
+        logger.warning("Injury scan failed: %s", exc)
+        return 0
+
+    if not signals:
+        return 0
+
+    inserted = await persist_injury_signals(pool, signals)
+
+    # Telegram alert — one digest per cycle, dedupe by market_id for 6h
+    buy_signals = [s for s in signals if s.action == "BUY"]
+    fresh: list[InjurySignal] = []
+    cutoff = now - timedelta(hours=6)
+    for s in buy_signals:
+        last = _injury_alerted.get(s.market_id)
+        if last and last > cutoff:
+            continue
+        fresh.append(s)
+        _injury_alerted[s.market_id] = now
+
+    logger.info(
+        "Injury scan: %d signals, %d inserted, %d fresh BUY alerts",
+        len(signals), inserted, len(fresh),
+    )
+
+    if fresh:
+        lines = ["🏥 <b>NBA Injury Scanner</b>"]
+        for s in fresh[:10]:
+            drift = f"{s.drift_24h:+.3f}" if s.drift_24h is not None else "n/a"
+            lines.append(
+                f"• <b>{s.healthy_team}</b> vs {s.injured_team}\n"
+                f"    {s.player_name} <b>{s.status}</b>  |  "
+                f"price {s.current_price:.3f}  drift {drift}  "
+                f"T-{s.hours_to_game:.1f}h"
+            )
+        try:
+            from trading.telegram_confirm import _post  # noqa: PLC0415
+            await _post(tg_token, "sendMessage", {
+                "chat_id": tg_chat_id,
+                "text": "\n".join(lines),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+        except Exception as exc:
+            logger.warning("Failed to send injury alert to Telegram: %s", exc)
+
+    return len(fresh)
+
+
+async def _run_calibration_scan(
+    pool: asyncpg.Pool,
+    config: dict,
+    tg_token: str,
+    tg_chat_id: str,
+) -> int:
+    """Scan active markets against calibration_edges; alert via Telegram.
+
+    Alert-only — same reasoning as injury_scanner. Mapping an edge direction
+    (YES/NO) to the correct Polymarket token requires per-market verification
+    the bot doesn't currently do, so the user confirms from the digest.
+
+    Returns number of fresh BUY alerts sent this cycle.
+    """
+    global _last_calibration_scan
+
+    cal_cfg = config.get("calibration_trader", {})
+    if not cal_cfg.get("enabled", False):
+        return 0
+
+    interval_sec = float(cal_cfg.get("scan_interval_min", 60)) * 60.0
+    now = datetime.now(timezone.utc)
+    if _last_calibration_scan is not None:
+        elapsed = (now - _last_calibration_scan).total_seconds()
+        if elapsed < interval_sec:
+            return 0
+    _last_calibration_scan = now
+
+    try:
+        signals = await asyncio.wait_for(
+            calibration_scan(
+                pool,
+                min_edge_pct=float(cal_cfg.get("min_edge_pct", 5.0)),
+                min_confidence=str(cal_cfg.get("min_confidence", "HIGH")),
+                hours_window=float(cal_cfg.get("hours_window", 48)),
+                max_signals=int(cal_cfg.get("max_signals", 10)),
+            ),
+            timeout=30,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Calibration scan timed out — skipping this cycle")
+        return 0
+    except Exception as exc:
+        logger.warning("Calibration scan failed: %s", exc)
+        return 0
+
+    if not signals:
+        logger.info("Calibration scan: 0 signals")
+        return 0
+
+    # Dedupe Telegram alerts for 12h per market_id (edge doesn't change rapidly)
+    fresh: list[CalibrationSignal] = []
+    cutoff = now - timedelta(hours=12)
+    for s in signals:
+        last = _calibration_alerted.get(s.market_id)
+        if last and last > cutoff:
+            continue
+        fresh.append(s)
+        _calibration_alerted[s.market_id] = now
+
+    logger.info(
+        "Calibration scan: %d signals, %d fresh alerts", len(signals), len(fresh)
+    )
+
+    if fresh:
+        lines = ["📐 <b>Calibration Trader</b>"]
+        for s in fresh[:10]:
+            lines.append(
+                f"• <b>{s.action}</b>  {s.slug}\n"
+                f"    sport={s.sport}  price={s.current_price:.3f}  "
+                f"edge={s.edge.edge_pct:+.2f}%  n={s.edge.n} ({s.edge.confidence})"
+            )
+        try:
+            from trading.telegram_confirm import _post  # noqa: PLC0415
+            await _post(tg_token, "sendMessage", {
+                "chat_id": tg_chat_id,
+                "text": "\n".join(lines),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+        except Exception as exc:
+            logger.warning("Failed to send calibration alert to Telegram: %s", exc)
+
+    return len(fresh)
+
+
+async def _run_drift_scan(
+    pool: asyncpg.Pool,
+    config: dict,
+    tg_token: str,
+    tg_chat_id: str,
+) -> int:
+    """T-30 — Cross-sport real-time drift monitor. Alert-only, 15 min cadence.
+
+    Drift alone isn't tradeable; the scan surfaces "something's happening" so a
+    human can correlate against news/scoreboards. has_spike candidates are
+    sorted lower (likely microstructure noise, not real news).
+    """
+    global _last_drift_scan
+
+    cfg = config.get("drift_monitor", {})
+    if not cfg.get("enabled", False):
+        return 0
+
+    interval_sec = float(cfg.get("scan_interval_min", 15)) * 60.0
+    now = datetime.now(timezone.utc)
+    if _last_drift_scan is not None:
+        elapsed = (now - _last_drift_scan).total_seconds()
+        if elapsed < interval_sec:
+            return 0
+    _last_drift_scan = now
+
+    try:
+        signals = await asyncio.wait_for(
+            drift_scan(
+                pool,
+                drift_threshold_pct=float(cfg.get("drift_threshold_pct", 4.0)),
+                lookback_hours=float(cfg.get("lookback_hours", 6.0)),
+                upcoming_hours=float(cfg.get("upcoming_hours", 48)),
+                max_signals=int(cfg.get("max_signals", 20)),
+            ),
+            timeout=30,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Drift scan timed out — skipping cycle")
+        return 0
+    except Exception as exc:
+        logger.warning("Drift scan failed: %s", exc)
+        return 0
+
+    if not signals:
+        return 0
+
+    inserted = await persist_drift_signals(pool, signals)
+
+    # Telegram dedupe: 6h per market (drift is slow-moving)
+    fresh: list[DriftSignal] = []
+    cutoff = now - timedelta(hours=6)
+    for s in signals:
+        if s.has_spike:
+            continue  # noisy — don't alert, just log to DB
+        last = _drift_alerted.get(s.market_id)
+        if last and last > cutoff:
+            continue
+        fresh.append(s)
+        _drift_alerted[s.market_id] = now
+
+    logger.info(
+        "Drift scan: %d signals, %d inserted, %d fresh alerts",
+        len(signals), inserted, len(fresh),
+    )
+
+    if fresh:
+        lines = ["📈 <b>Drift Monitor</b>"]
+        for s in fresh[:10]:
+            arrow = "↑" if s.direction == "UP" else "↓"
+            lines.append(
+                f"• {arrow} <b>{s.drift_pct:+.2f}%</b>  {s.sport}  "
+                f"{s.past_price:.3f}→{s.current_price:.3f}\n"
+                f"    {s.slug}"
+            )
+        try:
+            from trading.telegram_confirm import _post  # noqa: PLC0415
+            await _post(tg_token, "sendMessage", {
+                "chat_id": tg_chat_id,
+                "text": "\n".join(lines),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+        except Exception as exc:
+            logger.warning("Failed to send drift alert: %s", exc)
+
+    return len(fresh)
+
+
+async def _run_spike_scan(
+    pool: asyncpg.Pool,
+    config: dict,
+    tg_token: str,
+    tg_chat_id: str,
+) -> int:
+    """T-31 — Spike follow. Reads spike_events fired by ws_client SpikeTracker.
+
+    Alert-only in v1. Direction is correct (from spike_events.direction) but
+    YES/NO mapping to the right Polymarket token is blocked by T-35.
+    """
+    global _last_spike_scan
+
+    cfg = config.get("spike_follow", {})
+    if not cfg.get("enabled", False):
+        return 0
+
+    interval_sec = float(cfg.get("scan_interval_min", 5)) * 60.0
+    now = datetime.now(timezone.utc)
+    if _last_spike_scan is not None:
+        elapsed = (now - _last_spike_scan).total_seconds()
+        if elapsed < interval_sec:
+            return 0
+    _last_spike_scan = now
+
+    try:
+        signals = await asyncio.wait_for(
+            spike_scan(
+                pool,
+                since_minutes=int(cfg.get("since_minutes", 30)),
+                min_magnitude=float(cfg.get("min_magnitude", 0.05)),
+                min_steps=int(cfg.get("min_steps", 4)),
+                min_hours_to_game=float(cfg.get("min_hours_to_game", 1.0)),
+                upcoming_hours=float(cfg.get("upcoming_hours", 48)),
+                max_signals=int(cfg.get("max_signals", 10)),
+            ),
+            timeout=20,
+        )
+    except asyncio.TimeoutError:
+        logger.warning("Spike scan timed out — skipping cycle")
+        return 0
+    except Exception as exc:
+        logger.warning("Spike scan failed: %s", exc)
+        return 0
+
+    if not signals:
+        return 0
+
+    inserted = await persist_spike_signals(pool, signals)
+
+    # Dedupe by spike_event_id — never alert twice on the same event
+    fresh: list[SpikeSignal] = []
+    for s in signals:
+        if s.spike_event_id in _spike_alerted:
+            continue
+        fresh.append(s)
+        _spike_alerted.add(s.spike_event_id)
+
+    # Cap the dedupe set so it doesn't grow forever (last ~500 events)
+    if len(_spike_alerted) > 500:
+        # Drop oldest half — rough approximation, set has no order
+        for sid in list(_spike_alerted)[:250]:
+            _spike_alerted.discard(sid)
+
+    logger.info(
+        "Spike scan: %d signals, %d inserted, %d fresh alerts",
+        len(signals), inserted, len(fresh),
+    )
+
+    if fresh:
+        lines = ["⚡ <b>Spike Follow</b>"]
+        for s in fresh[:10]:
+            arrow = "↑" if s.direction == "up" else "↓"
+            lines.append(
+                f"• {arrow} <b>{s.magnitude:.3f}</b>  {s.n_steps} steps  "
+                f"@ {s.entry_price:.3f}\n"
+                f"    {s.sport}  T-{s.hours_to_game:.1f}h  {s.slug}"
+            )
+        try:
+            from trading.telegram_confirm import _post  # noqa: PLC0415
+            await _post(tg_token, "sendMessage", {
+                "chat_id": tg_chat_id,
+                "text": "\n".join(lines),
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True,
+            })
+        except Exception as exc:
+            logger.warning("Failed to send spike alert: %s", exc)
+
+    return len(fresh)
 
 
 async def _process_prop_signal(
@@ -511,6 +982,18 @@ async def _process_prop_signal(
         return 0.0
 
     order = await executor.buy(token_id, opp.yes_price, size_usd)
+
+    rejected, reason = _is_buy_rejected(order)
+    if rejected:
+        await log_order(pool, opp.market_id, None, "buy_rejected", order)
+        logger.error("PROP BUY rejected for %s: %s", label, reason)
+        await send_error_alert(
+            tg_token, tg_chat_id,
+            f"PROP BUY rejected for {label}: {reason}",
+        )
+        return 0.0
+
+    order_id_str = order["order_id"]
     actual_shares = order.get("size_shares", size_shares)
 
     position_id = await open_position(
@@ -523,7 +1006,7 @@ async def _process_prop_signal(
         size_shares=actual_shares,
         entry_price=opp.yes_price,
         game_start=None,  # prop markets don't always have game_start
-        clob_order_id=order.get("order_id", ""),
+        clob_order_id=order_id_str,
         notes=f"player={opp.player_name} type={opp.prop_type} threshold={opp.threshold}",
     )
     await log_order(pool, opp.market_id, position_id, "buy", order)
@@ -632,6 +1115,7 @@ async def run_loop(config: dict) -> None:
                 # 3. Scan MLB pitcher signals
                 mlb_cfg = config.get("mlb_pitcher_scanner", {})
                 pitcher_signals: list[PitcherSignal] = []
+                mlb_aliases: dict[str, str] = {}  # T-35: lifted out so _process_pitcher_signal can see it
                 if mlb_cfg.get("enabled", False):
                     try:
                         mlb_aliases = load_mlb_aliases()
@@ -659,6 +1143,32 @@ async def run_loop(config: dict) -> None:
                         logger.warning("MLB pitcher scan timed out — skipping this cycle")
                     except Exception as exc:
                         logger.warning("MLB pitcher scan failed: %s", exc)
+
+                # 3b. Scan Rotowire injuries (alert-only, cadence controlled inside)
+                try:
+                    await _run_injury_scan(
+                        pool, http_session, aliases, config, tg_token, tg_chat_id
+                    )
+                except Exception as exc:
+                    logger.warning("Injury scan wrapper failed: %s", exc)
+
+                # 3c. Calibration trader — match active markets against historical edges
+                try:
+                    await _run_calibration_scan(pool, config, tg_token, tg_chat_id)
+                except Exception as exc:
+                    logger.warning("Calibration scan wrapper failed: %s", exc)
+
+                # 3d. T-30 — cross-sport drift monitor (alert-only, 15-min cadence)
+                try:
+                    await _run_drift_scan(pool, config, tg_token, tg_chat_id)
+                except Exception as exc:
+                    logger.warning("Drift scan wrapper failed: %s", exc)
+
+                # 3e. T-31 — spike follow (alert-only, 5-min cadence, dedupe by event id)
+                try:
+                    await _run_spike_scan(pool, config, tg_token, tg_chat_id)
+                except Exception as exc:
+                    logger.warning("Spike scan wrapper failed: %s", exc)
 
                 # 4. Scan prop opportunities (capped at 90s to avoid hanging)
                 scanner_cfg = config.get("prop_scanner", {})
@@ -718,7 +1228,8 @@ async def run_loop(config: dict) -> None:
                         logger.debug("Decay cache: suppressing MLB %s", psig.favored_team)
                         continue
                     added = await _process_pitcher_signal(
-                        psig, pool, executor, config, tg_token, tg_chat_id, total_exp
+                        psig, pool, executor, config, tg_token, tg_chat_id, total_exp,
+                        mlb_aliases,
                     )
                     total_exp += added
 

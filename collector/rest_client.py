@@ -8,6 +8,8 @@ from typing import Any, Optional
 
 import aiohttp
 
+from collector.network import make_connector
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,7 +25,7 @@ class RestClient:
     async def start(self):
         """Open the underlying aiohttp session. Must be called before any requests."""
         timeout = aiohttp.ClientTimeout(total=30)
-        self.session = aiohttp.ClientSession(timeout=timeout)
+        self.session = aiohttp.ClientSession(connector=make_connector(), timeout=timeout)
 
     async def close(self):
         """Close the aiohttp session and release connections."""

@@ -57,6 +57,97 @@ alerts:
   # Triggers: Phase 0 summary, collector start, data gap, spike, WS reconnect loop (≥3 attempts)
   slack_webhook_url: ""
 
+  # Telegram Bot notifications — leave blank to disable.
+  # 1. Create a bot via @BotFather → get token
+  # 2. Write /start to your bot, then run: python scripts/send_signals.py --dry-run
+  #    to discover your chat_id, OR check via getUpdates API.
+  # Triggers: signal digest (tanking + props), prop opportunities (daemon mode)
+  telegram_bot_token: ""
+  telegram_chat_id: ""
+
+injury_scanner:
+  enabled: true               # set false to disable Rotowire injury alerts
+  scan_interval_min: 10       # run every 10 min (separate from main 5-min cycle)
+  hours_window: 24            # only games starting within N hours
+  statuses: "OUT,DOUBTFUL"    # comma-separated Rotowire statuses to alert on
+  max_entry_price: 0.85       # only BUY if healthy team's YES price below this
+
+calibration_trader:
+  enabled: true               # set false to disable calibration-edge alerts
+  scan_interval_min: 60       # run every 60 min (the edge table is static day-to-day)
+  min_edge_pct: 5.0           # only alert when |actual_win_rate - price| >= this (% points)
+  min_confidence: "HIGH"      # HIGH (n>=50) / MEDIUM (n>=20) / LOW
+  hours_window: 48            # only games starting within N hours
+  max_signals: 10             # cap Telegram digest size per cycle
+
+drift_monitor:
+  enabled: true               # T-30: cross-sport real-time drift alerts
+  scan_interval_min: 15       # run every 15 min
+  drift_threshold_pct: 4.0    # alert when |drift_pct| >= this over the lookback window
+  lookback_hours: 6.0         # how far back to compare current price
+  upcoming_hours: 48          # only consider markets starting within N hours
+  max_signals: 20             # cap Telegram digest size per cycle
+
+spike_follow:
+  enabled: true               # T-31: follow direction of finalized spikes
+  scan_interval_min: 5        # run every 5 min (spikes are time-sensitive)
+  since_minutes: 30           # only consider spike_events from the last N minutes
+  min_magnitude: 0.05         # 5¢ minimum spike magnitude
+  min_steps: 4                # 4 consecutive same-direction steps
+  min_hours_to_game: 1.0      # skip spikes too close to tip-off
+  upcoming_hours: 48
+  max_signals: 10
+
+prop_scanner:
+  scan_interval_sec: 300      # run every 5 min in daemon mode
+  alert_min_roi: 5.0          # only alert if ROI > 5%
+  alert_min_depth_usd: 50     # skip markets with ask depth < $50
+  price_min: 0.25             # minimum YES price to consider
+  price_max: 0.58             # maximum YES price to consider
+  hours_window: 24            # only games starting within N hours
+
+mlb_pitcher_scanner:
+  enabled: true               # T-45: gate for start_bot.sh + watchdog daemon
+                              # (pre-T-45 the scanner was always launched,
+                              #  ignoring this flag — operators on non-MLB
+                              #  deployments got unsolicited ESPN traffic and
+                              #  pitcher_signals writes)
+  min_era_differential: 1.0   # only alert on ERA gap >= this
+  hours_window: 48            # only games starting within N hours
+
+trading:
+  enabled: false              # set true to enable live order placement
+  budget_usd: 100             # total USDC budget for the bot
+  max_position_pct: 3.0       # max % of budget per trade (e.g. 3% = $3 on $100 budget)
+  max_total_exposure_pct: 30.0  # max % of budget open at once (e.g. 30% = $30)
+  min_ask_depth_usd: 50       # skip market if ask side thinner than this
+  exit_minutes_before: 30     # auto-close positions N minutes before game_start
+  price_slippage_tolerance: 0.03  # reject if live price exceeds signal price by >3¢
+  scan_interval_sec: 300      # re-scan for new signals every N seconds
+  confirm_timeout_sec: 300    # Telegram confirm window (5 min), then auto-skip
+
+  # EV-based position sizing: scales size between ev_min_scale and 100% of max_position
+  ev_min_roi_pct: 5.0         # ROI at this level → ev_min_scale of max position
+  ev_max_roi_pct: 20.0        # ROI at this level → full max position
+  ev_min_scale: 0.4           # fraction of max_position at minimum ROI
+
+  # Risk guards
+  stop_loss_pct: 40.0         # auto-exit if bid drops 40% below entry price
+  stop_loss_check_sec: 300    # how often stop-loss monitor runs (seconds)
+  take_profit_pct: 40.0       # auto-exit if bid rises 40% above entry (0 = disabled)
+  daily_loss_limit_usd: 20.0  # circuit breaker: block new entries if daily loss exceeds this
+  max_positions_per_game: 2   # max simultaneous positions within 3-hour game window
+  max_positions_per_sport: 4  # max simultaneous positions per sport
+
+  # Order management
+  max_pending_hours: 6.0      # auto-cancel GTC order after this many hours unfilled
+  reprice_after_hours: 2.0    # reprice LIVE order if unfilled for longer than this
+  reprice_threshold_pct: 5.0  # reprice only if market ask moved >5% from entry price
+
+  # Alerts
+  low_balance_threshold_usd: 20.0   # Telegram alert if CLOB balance drops below this
+  heartbeat_interval_hours: 6.0     # send "bot alive" ping every N hours (0 = disabled)
+
 logging:
   level: INFO
   file: logs/collector.log
