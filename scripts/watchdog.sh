@@ -7,6 +7,15 @@
 # closing the version-skew gap codex flagged. Each process has its own
 # restart counter + HEALTHY_RESET_TICKS reset so routine deploys don't burn
 # the MAX_RESTARTS budget.
+#
+# T-46 fix: bash-in-memory staleness guard. A running watchdog keeps the
+# bytes of watchdog.sh it read at startup, even after `git pull` replaces
+# the file on disk. If `_git_sync` somehow doesn't hit its own kill+exec
+# path (race condition, pre-T-42 version of this script still in memory,
+# etc.), the watchdog and all supervised daemons can run stale code
+# indefinitely. The mtime check in the main loop below self-execs the
+# watchdog whenever scripts/watchdog.sh changes on disk — belt-and-suspenders
+# alongside the kill+exec in `_git_sync`.
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$REPO/logs"
@@ -14,6 +23,17 @@ SYNC_LOG="$LOG_DIR/git_sync.log"
 MAX_RESTARTS=10
 HEALTHY_RESET_TICKS=10   # 10 ticks × 30s = 5 min of uptime earns the counter back
 tick=0
+
+# T-46: record mtime of this script at startup so the main loop can detect
+# on-disk changes and self-reload. `stat -f %m` is macOS syntax; fall back
+# to `stat -c %Y` for Linux. If neither works, we print "0" and the main-loop
+# guard (below) will skip the check rather than spin.
+_script_mtime() {
+  stat -f %m "$REPO/scripts/watchdog.sh" 2>/dev/null \
+    || stat -c %Y "$REPO/scripts/watchdog.sh" 2>/dev/null \
+    || echo 0
+}
+WATCHDOG_START_MTIME=$(_script_mtime)
 
 PYTHON="${PYTHON:-$REPO/venv/bin/python}"
 if [ ! -f "$PYTHON" ]; then
@@ -59,7 +79,48 @@ else
   echo "[watchdog] mlb_pitcher_scanner disabled — not supervising"
 fi
 
-echo "[watchdog] started — supervising ${#DAEMON_NAMES[@]} daemons every 30s, git sync every 5 min"
+echo "[watchdog] started — supervising ${#DAEMON_NAMES[@]} daemons every 30s, git sync every 5 min (startup_mtime=$WATCHDOG_START_MTIME)"
+
+# ────────────────────────────────────────────────────────────────────────────
+# T-46: shared helper — preflight, kill all supervised children, exec self.
+# Called by `_git_sync` (after successful pull+preflight) and by the main-loop
+# mtime check (when watchdog.sh changed on disk but kill+exec was skipped).
+#
+# Returns 1 ONLY if preflight fails. On success, exec replaces the process
+# and this function does not return.
+# ────────────────────────────────────────────────────────────────────────────
+_preflight_then_kill_and_exec() {
+  local reason="$1"
+  if [ -f "$REPO/scripts/db_preflight.py" ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Running DB schema preflight ($reason)" >> "$SYNC_LOG"
+    if ! "$PYTHON" "$REPO/scripts/db_preflight.py" >> "$SYNC_LOG" 2>&1; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S') ⚠️  SCHEMA PREFLIGHT FAILED ($reason) — daemons keep running on old code" >> "$SYNC_LOG"
+      return 1
+    fi
+  fi
+
+  # Preflight passed — kill every supervised daemon so the post-exec watchdog
+  # restarts them on the new code. Children were working moments ago, so we
+  # use SIGTERM to let graceful shutdown run first.
+  for name in "${DAEMON_NAMES[@]}"; do
+    pf="$LOG_DIR/${name}.pid"
+    if [ -f "$pf" ]; then
+      p="$(cat "$pf")"
+      if kill -0 "$p" 2>/dev/null; then
+        echo "$(date '+%Y-%m-%d %H:%M:%S') Restarting $name (PID $p) for new code ($reason)" >> "$SYNC_LOG"
+        kill "$p" 2>/dev/null || true
+      fi
+    fi
+  done
+  sleep 2
+
+  # Round-5 fix: replace THIS bash process with a fresh invocation of
+  # watchdog.sh — the on-disk version, not the one still in memory.
+  # Same PID (watchdog.pid stays valid). Children were just killed above;
+  # the fresh watchdog picks them up dead and restarts them on new code.
+  echo "$(date '+%Y-%m-%d %H:%M:%S') Re-executing watchdog with new code ($reason)" >> "$SYNC_LOG"
+  exec "$0" "$@"
+}
 
 _git_sync() {
   cd "$REPO" || return
@@ -79,44 +140,20 @@ _git_sync() {
   git reset --hard origin/master >> "$SYNC_LOG" 2>&1
   echo "$(date '+%Y-%m-%d %H:%M:%S') Done: $(git log -1 --format='%h %s')" >> "$SYNC_LOG"
 
-  # T-44: preflight BEFORE touching any daemon. Healthy processes running on
-  # the previous commit keep serving until we know the new schema is usable.
-  # Codex round 8 HIGH finding: watchdog previously killed children first and
-  # then noticed preflight failure — an avoidable outage on migration miss.
-  if [ -f "$REPO/scripts/db_preflight.py" ]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S') Running DB schema preflight after pull" >> "$SYNC_LOG"
-    if ! "$PYTHON" "$REPO/scripts/db_preflight.py" >> "$SYNC_LOG" 2>&1; then
-      echo "$(date '+%Y-%m-%d %H:%M:%S') ⚠️  SCHEMA PREFLIGHT FAILED — rolling back to $PREV_HEAD; daemons keep running on old code" >> "$SYNC_LOG"
-      git reset --hard "$PREV_HEAD" >> "$SYNC_LOG" 2>&1
-      echo "$(date '+%Y-%m-%d %H:%M:%S') Rollback done. Operator: apply db/schema.sql, next tick will re-attempt pull." >> "$SYNC_LOG"
-      # Leave children untouched. Return WITHOUT exec — next sync tick retries
-      # the fetch/preflight cycle. Rollback puts us back on PREV_HEAD so the
-      # next `git rev-parse HEAD != origin/master` check fires again.
-      return
-    fi
+  # T-44 rollback-on-preflight-fail is still inline here because the rollback
+  # step (git reset back to PREV_HEAD) is pull-specific — the main-loop mtime
+  # check has no meaningful rollback target.
+  if ! _preflight_then_kill_and_exec "after pull"; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ⚠️  Rolling back to $PREV_HEAD; next tick will re-attempt pull" >> "$SYNC_LOG"
+    git reset --hard "$PREV_HEAD" >> "$SYNC_LOG" 2>&1
+    echo "$(date '+%Y-%m-%d %H:%M:%S') Rollback done. Operator: apply db/schema.sql, next tick will re-attempt pull." >> "$SYNC_LOG"
+    # Leave children untouched. Return WITHOUT exec — next sync tick retries
+    # the fetch/preflight cycle. Rollback puts us back on PREV_HEAD so the
+    # next `git rev-parse HEAD != origin/master` check fires again.
+    return
   fi
-
-  # Preflight passed — safe to kill children and restart on new code.
-  for name in "${DAEMON_NAMES[@]}"; do
-    pf="$LOG_DIR/${name}.pid"
-    if [ -f "$pf" ]; then
-      p="$(cat "$pf")"
-      if kill -0 "$p" 2>/dev/null; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') Restarting $name (PID $p) for new code" >> "$SYNC_LOG"
-        kill "$p" 2>/dev/null || true
-      fi
-    fi
-  done
-  sleep 2
-
-  # Round-5 fix: the watchdog script itself also needs the new code. The
-  # bash process has already read the old script into memory; `git reset`
-  # on disk doesn't retroactively update it. `exec "$0"` replaces this
-  # process in place (same PID, so watchdog.pid stays valid) with a fresh
-  # invocation of the updated script. Children were just killed above; the
-  # fresh watchdog will restart them on the new code.
-  echo "$(date '+%Y-%m-%d %H:%M:%S') Re-executing watchdog with new code" >> "$SYNC_LOG"
-  exec "$0" "$@"
+  # _preflight_then_kill_and_exec does not return on success (it exec's).
+  # Nothing after this point runs on the success path.
 }
 
 while true; do
@@ -126,6 +163,34 @@ while true; do
   # Git sync every 10 ticks (5 min)
   if [ $((tick % 10)) -eq 0 ]; then
     _git_sync
+    # After _git_sync (whether it pulled, rolled back, or no-op'd), refresh
+    # the baseline so the mtime check below doesn't re-trigger on a pull
+    # that already went through the preflight+kill+exec path.
+    WATCHDOG_START_MTIME=$(_script_mtime)
+  fi
+
+  # T-46: detect disk changes that the `_git_sync` path missed. Primary case:
+  # the bash process running this script is from a version that predates the
+  # current kill+exec logic, so even a successful pull never triggered the
+  # self-reload. Secondary case: operator scp'd a new watchdog.sh without a
+  # git push. In both, mtime of the on-disk file changes; we kill children
+  # and exec ourselves so the new code takes effect. Git reset --hard updates
+  # mtime even on unchanged files, so this fires after any pull, which is
+  # exactly the safety net we want — a superfluous re-exec is cheap.
+  current_mtime=$(_script_mtime)
+  if [ "$current_mtime" != "$WATCHDOG_START_MTIME" ] \
+      && [ "$current_mtime" != "0" ] \
+      && [ "$WATCHDOG_START_MTIME" != "0" ]; then
+    echo "[watchdog] $(date -u): watchdog.sh changed on disk ($WATCHDOG_START_MTIME → $current_mtime) — reloading"
+    if ! _preflight_then_kill_and_exec "mtime change"; then
+      # Preflight failed. Don't keep retrying every 30s in a tight loop:
+      # accept the new mtime as the baseline so the next iteration is quiet.
+      # If operator fixes the schema, the following `_git_sync` tick will
+      # either no-op (HEAD == origin) or pull-then-restart; either way we
+      # recover without manual intervention.
+      WATCHDOG_START_MTIME="$current_mtime"
+    fi
+    # _preflight_then_kill_and_exec does not return on success.
   fi
 
   # Iterate every daemon — same supervision logic applies uniformly.
