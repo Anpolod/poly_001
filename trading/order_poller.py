@@ -471,7 +471,20 @@ async def poll_order_fills(
                 if not order_id:
                     await _handle_no_order_id(pos, pool, executor, tg_token, tg_chat_id)
                 elif order_id.startswith("DRY_"):
-                    pass  # dry-run fake ID — skip CLOB polling
+                    # T-47: auto-fill DRY_ orders on first poll so dry_run paper
+                    # positions behave like real filled positions for the rest
+                    # of the lifecycle (risk_guard stop-loss/take-profit,
+                    # auto-exit before game, exit_pending DRY_SELL flow).
+                    # Previously: `pass` left them in fill_status='pending'
+                    # forever, risk_guard skipped them (only monitors 'filled'),
+                    # and auto-exit never fired → paper trading was "decorative":
+                    # positions opened but never closed, no simulated P&L.
+                    if (pos.get("fill_status") or "pending").lower() == "pending":
+                        await _set_fill_status(pool, pos["id"], "filled")
+                        logger.info(
+                            "Position %d (%s): DRY_ order auto-filled (dry_run)",
+                            pos["id"], pos["slug"] or pos["market_id"],
+                        )
                 else:
                     await _handle_existing_order(pos, pool, executor, tg_token, tg_chat_id, config)
 

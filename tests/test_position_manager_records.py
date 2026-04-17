@@ -229,6 +229,102 @@ def test_dry_run_exit_closes_position_immediately() -> None:
     executor.get_order.assert_not_awaited()
 
 
+def test_dry_run_buy_auto_fills_on_first_poll() -> None:
+    """T-47: order_poller must transition DRY_ buy orders from fill_status
+    'pending' → 'filled' on first poll tick. Previously, DRY_ orders were
+    silently skipped (no CLOB polling, no fill_status transition) so they
+    stayed 'pending' forever — risk_guard only monitors 'filled' positions,
+    so stop-loss/take-profit/auto-exit never fired on paper positions.
+
+    This test verifies the one-line transition in poll_order_fills' DRY_
+    branch: for any DRY_ position in fill_status='pending', _set_fill_status
+    must be called with 'filled'.
+    """
+    from unittest.mock import patch
+    from trading import order_poller
+
+    pending_dry = {
+        "id": 42,
+        "slug": "mlb-atl-phi",
+        "market_id": "mid-paper",
+        "clob_order_id": "DRY_50616872_515",
+        "fill_status": "pending",
+        "token_id": "0xTOKEN",
+        "entry_price": 0.515,
+        "size_usd": 1.41,
+        "game_start": None,
+    }
+    # Pool that returns one DRY_ pending row, captures _set_fill_status calls.
+    pool = AsyncMock()
+    pool.execute = AsyncMock()
+    executor = AsyncMock()
+
+    call_count = {"n": 0}
+
+    async def fake_get_positions(_pool):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return [pending_dry]
+        raise asyncio.CancelledError()   # stop the loop after first iteration
+
+    with patch("trading.order_poller.get_open_positions", new=fake_get_positions), \
+         patch("trading.order_poller._ensure_fill_status_column", new=AsyncMock()), \
+         patch("trading.order_poller._set_fill_status", new_callable=AsyncMock) as mock_set, \
+         patch("trading.order_poller.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+        try:
+            asyncio.run(order_poller.poll_order_fills(
+                pool, executor, "tok", "chat",
+                config={"trading": {"order_poll_interval_sec": 1}},
+            ))
+        except asyncio.CancelledError:
+            pass
+
+    # The DRY_ branch must have fired for the pending position, transitioning
+    # fill_status to 'filled' so risk_guard + auto-exit start tracking it.
+    mock_set.assert_any_call(pool, 42, "filled")
+
+
+def test_dry_run_buy_does_not_re_fill_already_filled() -> None:
+    """Defensive: if a DRY_ position is already fill_status='filled' (second
+    poll tick, risk_guard already took over), do NOT transition again —
+    _set_fill_status('filled', filled) is idempotent but extra DB writes
+    per tick × many positions × many ticks is wasteful."""
+    from unittest.mock import patch
+    from trading import order_poller
+
+    already_filled_dry = {
+        "id": 43, "slug": "x", "market_id": "m",
+        "clob_order_id": "DRY_ABC_500",
+        "fill_status": "filled",
+        "token_id": "t", "entry_price": 0.5, "size_usd": 5.0,
+        "game_start": None,
+    }
+    pool = AsyncMock(); pool.execute = AsyncMock()
+    executor = AsyncMock()
+
+    call_count = {"n": 0}
+
+    async def fake_get_positions(_pool):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return [already_filled_dry]
+        raise asyncio.CancelledError()
+
+    with patch("trading.order_poller.get_open_positions", new=fake_get_positions), \
+         patch("trading.order_poller._ensure_fill_status_column", new=AsyncMock()), \
+         patch("trading.order_poller._set_fill_status", new_callable=AsyncMock) as mock_set, \
+         patch("trading.order_poller.asyncio.sleep", new=AsyncMock(side_effect=asyncio.CancelledError)):
+        try:
+            asyncio.run(order_poller.poll_order_fills(
+                pool, executor, "tok", "chat",
+                config={"trading": {"order_poll_interval_sec": 1}},
+            ))
+        except asyncio.CancelledError:
+            pass
+
+    mock_set.assert_not_called()   # no DB write when already filled
+
+
 def test_dry_run_exit_reverts_if_no_usable_price() -> None:
     """Defensive: if somehow both current_bid and entry_price are missing/zero,
     we must not close at $0 (that would book an outsized fake loss). Revert
