@@ -45,13 +45,19 @@ def check_entry(
     if hours_to_game < _MIN_HOURS_TO_GAME:
         return "skip", f"game starts in {hours_to_game:.1f}h (< {_MIN_HOURS_TO_GAME}h)", "🔴"
 
+    # Thin / dead market check runs BEFORE the ratio check. An ask at 0.99 is
+    # a placeholder level (no real sellers near fair value), not a statement
+    # that the market is trading at 99¢ — so the correct response is a GTC
+    # limit at signal_price, not a hard skip. Prior ordering (ratio first) was
+    # a superset-trap: dead-market was *always* also >15% above signal for any
+    # reasonable signal < 0.85, so the "limit" branch was unreachable dead code
+    # for most MLB/NBA pre-game markets.
+    if ask >= _MAX_DEAD_ASK:
+        return "limit", f"ask {ask:.3f} ≥ {_MAX_DEAD_ASK} (dead market — limit order)", "🟡"
+
     if ask > signal_price * _MAX_ASK_RATIO:
         over_pct = (ask / signal_price - 1) * 100
         return "skip", f"ask {ask:.3f} is {over_pct:.0f}% above signal {signal_price:.3f}", "🔴"
-
-    # Thin market — place GTC limit at signal_price instead
-    if ask >= _MAX_DEAD_ASK:
-        return "limit", f"ask {ask:.3f} ≥ {_MAX_DEAD_ASK} (dead market — limit order)", "🟡"
 
     if bid <= 0:
         return "limit", "no bids — limit order at signal price", "🟡"

@@ -46,15 +46,35 @@ class TestCheckEntry:
         assert decision == "enter"
         assert emoji == "🟢"
 
-    def test_dead_ask_skips_when_far_from_signal(self):
-        """ask=0.99 on signal=0.185 → ratio check fires first (435% above signal) → skip."""
+    def test_dead_ask_returns_limit_even_when_far_from_signal(self):
+        """ask=0.99 on signal=0.185 → dead-market check fires FIRST (reordered
+        post-2026-04-17 — see entry_filter docstring). Before the reorder, the
+        ratio check (0.99 > 0.185*1.15=0.213) short-circuited and we skipped.
+        After the reorder we place a GTC limit at signal_price and wait —
+        which is the whole point of having a dead-ask branch.
+
+        Regression: real-world MLB pre-game markets often have ask=0.99 as
+        the only level on the book (placeholder, not a real trading price).
+        Skipping these meant 100% of MLB HIGH signals never opened a paper
+        position in dry_run mode; 2026-04-17 post-ship check found 0 live
+        positions despite 5 HIGH+BUY signals in 24h."""
         decision, reason, emoji = check_entry(
             bid=0.01, ask=0.99, signal_price=0.185,
             ask_depth_usd=5.0, hours_to_game=6.0,
         )
-        assert decision == "skip"
-        assert emoji == "🔴"
-        assert "signal" in reason
+        assert decision == "limit"
+        assert emoji == "🟡"
+        assert "dead market" in reason
+
+    def test_dead_ask_on_realistic_mlb_signal_returns_limit(self):
+        """Exact 2026-04-17 MLB scenario: ask=0.99 on signal=0.515 (Chicago
+        Cubs HIGH). Dead-market check must fire, not ratio-check-skip."""
+        decision, _, emoji = check_entry(
+            bid=0.01, ask=0.99, signal_price=0.515,
+            ask_depth_usd=0.0, hours_to_game=4.0,
+        )
+        assert decision == "limit"
+        assert emoji == "🟡"
 
     def test_dead_ask_returns_limit_when_signal_near_one(self):
         """ask=0.95 on signal=0.90 → ratio is 0.95/0.90=1.055 < 1.15 → ratio OK, dead ask → limit."""
@@ -142,13 +162,14 @@ class TestFormatMarketStatus:
         assert isinstance(result, str)
         assert any(e in result for e in ("🟢", "🟡", "🔴"))
 
-    def test_dead_market_far_from_signal_shows_red(self):
-        """ask=0.99 >> signal=0.185: ratio check fires → red skip."""
+    def test_dead_market_far_from_signal_shows_yellow(self):
+        """ask=0.99 >> signal=0.185: post-2026-04-17 dead-market check runs
+        first → yellow limit (was red skip pre-reorder)."""
         result = format_market_status(
             bid=0.01, ask=0.99, signal_price=0.185,
             ask_depth_usd=1.0, hours_to_game=6.0,
         )
-        assert "🔴" in result
+        assert "🟡" in result
 
     def test_dead_market_near_signal_shows_yellow(self):
         """ask=0.95 near signal=0.90 → passes ratio, hits dead-ask → yellow."""
