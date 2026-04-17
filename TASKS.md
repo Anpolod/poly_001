@@ -261,6 +261,60 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-46 · Watchdog self-reload on watchdog.sh mtime change ✅
+**Status:** DONE — 2026-04-17
+**Источник:** post-ship observation 2026-04-17. Bot running stale code 22+ hours after multiple pulls.
+**Время:** ~40 мин
+
+**Проблема:**
+Bash читает `scripts/watchdog.sh` в память при старте и НИКОГДА не re-читает. Если `_git_sync` pull'ит версию с обновлённой kill+exec логикой, bash-in-memory продолжает крутить СТАРУЮ логику → daemons и сам watchdog остаются на stale code неограниченно.
+
+Observed 2026-04-17: watchdog PID 51521 (запущен Thu 2026-04-16 14:53) обработал 4 pull'а (60d8c97, 341fbbb, 059bc2b, 1a9e2d9) через 22h uptime. В `git_sync.log` только "Done: <sha>" — никаких preflight/kill/exec/re-exec сообщений, которые ДОЛЖНЫ быть в T-44 коде. Т.е. в памяти был pre-T-42 `_git_sync` (только `git reset --hard` + return), хотя on-disk файл с T-35 имел полную T-44 логику. Точная причина почему bash-memory не соответствовал on-disk версии при launch — не установлена (race, system quirk, возможно pre-T-42 watchdog был респавнён через external механизм), но симптом стабилен.
+
+**Fix (T-46) — belt-and-suspenders mtime check:**
+
+1. На startup захватываю `WATCHDOG_START_MTIME=$(stat -f %m scripts/watchdog.sh)`  — log line теперь `started — supervising N daemons every 30s, git sync every 5 min (startup_mtime=<epoch>)` чтобы визуально подтверждать что running на T-46 коде
+
+2. Extracted shared helper `_preflight_then_kill_and_exec(reason)`:
+   - Runs preflight; returns 1 если fail
+   - Иначе kill'ит всех supervised children (по pidfiles) + `exec "$0" "$@"`
+   - Used both by `_git_sync` (после pull+preflight) и main-loop mtime check
+
+3. Main loop каждые 30s:
+   ```bash
+   current_mtime=$(_script_mtime)
+   if [ "$current_mtime" != "$WATCHDOG_START_MTIME" ]; then
+     _preflight_then_kill_and_exec "mtime change"
+   fi
+   ```
+
+4. После `_git_sync` call обновляю `WATCHDOG_START_MTIME` → mtime check не duplicate-fire'ит на нормальном pull-kill-exec path
+
+5. Preflight-fail на mtime path: accept current mtime как new baseline + leave children running. Не retry'ит 30s tight loop. Следующий `_git_sync` tick сработает по rich-logic path с rollback-capability.
+
+**Design choice — асимметрия путей:**
+- `_git_sync` path: pull → preflight → (rollback on fail | kill+exec on pass)  
+- mtime path: preflight → (accept baseline + log on fail | kill+exec on pass)
+
+Rollback-on-fail только в _git_sync path потому что только он знает PREV_HEAD. mtime path triggered by arbitrary disk change — у него нет meaningful rollback target.
+
+**Verification:**
+- `bash -n scripts/watchdog.sh` clean
+- 224/224 python tests pass (scope unchanged)
+- **End-to-end behavioral test на Mac Mini:**
+  1. Killed stale watchdog 51521 one-time
+  2. Manually launched fresh → log showed `startup_mtime=1776425148` (T-46 format)
+  3. `touch scripts/watchdog.sh` → mtime 1776425148 → 1776425355
+  4. 35 сек спустя: watchdog.log записал `watchdog.sh changed on disk (1776425148 → 1776425355) — reloading`
+  5. git_sync.log: preflight ran, 4 children killed, `Re-executing watchdog with new code (mtime change)`, fresh watchdog logged `startup_mtime=1776425355`
+  6. All 7 daemons alive with new PIDs (bot, dashboard, mlb_scanner, stats_exporter, stats_server got fresh — collector stayed 51511 for unrelated reasons)
+  7. 3 open_positions preserved through restart (state in Postgres, daemons stateless)
+
+**Explicit non-goals (deferred):**
+- `stop_bot.sh` + `pkill -f watchdog.sh` fallback для orphan cleanup — обсуждалось как Solution 2, пользователь не выбрал. Orphan watchdog'и всё ещё могут накапливаться если pidfile застревает; fixit когда understand why Wed orphan появился.
+
+---
+
 ### T-45 · Round-9 adversarial fixes (start_bot.sh ordering + MLB config gate) ✅
 **Status:** DONE — 2026-04-16
 **Источник:** codex adversarial review round 9 (2026-04-16), verdict NO-SHIP (1 HIGH + 1 MED)
