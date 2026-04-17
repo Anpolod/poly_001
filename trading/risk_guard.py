@@ -70,9 +70,13 @@ _BID_FLOOR_MIN_ENTRY = 0.10     # only guard middle-of-market positions
 _MAX_SPREAD_RATIO = 3.0         # ask/bid > this ⇒ quote untrusted
 
 
-def _bid_looks_orphan(bid: float, ask: float, entry_price: float) -> bool:
+# T-49: renamed from `_bid_looks_orphan` to `bid_looks_orphan` (public) so
+# `trading.exit_monitor` and any future exit path can import the same guard.
+# Single source of truth: "is this CLOB quote trustworthy enough to trade on?"
+def bid_looks_orphan(bid: float, ask: float, entry_price: float) -> bool:
     """Return True if the CLOB quote looks like a dust bid on a thin book
-    rather than a real price collapse. Used to suppress false stop-losses.
+    rather than a real price collapse. Used to suppress false stop-losses
+    (risk_guard) AND false stagnation exits (exit_monitor).
     """
     if entry_price < _BID_FLOOR_MIN_ENTRY:
         return False   # longshot: 0.01 might be the real price
@@ -158,7 +162,7 @@ async def stop_loss_monitor(
                 if bid <= 0:
                     continue
 
-                if _bid_looks_orphan(bid, ask, entry_price):
+                if bid_looks_orphan(bid, ask, entry_price):
                     # Dust bid on thin book — neither update current_bid nor fire
                     # stop-loss. Dashboard would otherwise show a phantom -90%
                     # unrealized loss; risk_guard would have placed a DRY_SELL

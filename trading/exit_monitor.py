@@ -22,6 +22,7 @@ from trading.position_manager import (
     get_positions_near_expiry,
     log_order,
 )
+from trading.risk_guard import bid_looks_orphan  # T-49: shared quote sanity guard
 from trading.telegram_confirm import send_error_alert, send_exit_notification
 
 logger = logging.getLogger(__name__)
@@ -179,7 +180,30 @@ async def check_stagnation_exit(
             continue
 
         try:
-            best_bid = await executor.get_best_bid(token_id)
+            # T-49: use market_info (bid + ask) so we can apply the same
+            # orphan-dust-quote guard that risk_guard uses. Without it,
+            # stagnation exits close at bid=0.01 on thin pre-game books
+            # (dead ask at 0.99 → mid stays 0.5 → stagnation fires → we
+            # tried to SELL at the dust bid and booked a fake -95% loss).
+            # See risk_guard.bid_looks_orphan for the full rationale.
+            try:
+                info = await executor.get_market_info(token_id)
+                best_bid = float(info.get("bid") or 0.0)
+                ask = float(info.get("ask") or 0.0)
+            except Exception:
+                best_bid = await executor.get_best_bid(token_id)
+                ask = 0.0
+
+            entry_price = float(pos["entry_price"] or 0)
+            if best_bid > 0 and bid_looks_orphan(best_bid, ask, entry_price):
+                logger.warning(
+                    "%s: stagnation exit skipped — orphan dust quote "
+                    "(bid=%.3f ask=%.3f entry=%.3f). Will retry when book thickens "
+                    "or auto-exit-before-game takes over.",
+                    slug, best_bid, ask, entry_price,
+                )
+                continue
+
             if best_bid <= 0:
                 best_bid = float(pos["entry_price"] or 0.01)
 
