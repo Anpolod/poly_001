@@ -49,6 +49,44 @@ logger = logging.getLogger(__name__)
 
 _GAME_WINDOW_HOURS = 3.0   # positions within this window count as "same game"
 
+# ── T-48: bid sanity thresholds ──────────────────────────────────────────────
+# Thin pre-game Polymarket books often show a lone "dust" bid at 0.01 (or
+# other far-below-fair levels) while the ask side is still near fair value.
+# Treating that bid as a real price triggers a false stop-loss, cascades into
+# DRY_SELL + close_position at $0.01, and records a ~95% loss that never
+# actually happened.
+#
+# Sanity rule: if bid is far below entry AND the spread is "implausibly wide"
+# (ask >> bid by more than _MAX_SPREAD_RATIO), we treat the quote as an
+# orphan dust bid and skip this tick. A legitimate real-market collapse
+# would pull BOTH sides of the book down — bid and ask would stay close
+# together. A wide spread means only ONE side moved, which is the signature
+# of a stale / thin / dust quote.
+#
+# Longshot positions (entry < _BID_FLOOR_MIN_ENTRY) genuinely CAN collapse
+# to $0.01 — we don't apply the guard there.
+_BID_FLOOR_RATIO = 0.3          # bid < entry*this ⇒ candidate "too low"
+_BID_FLOOR_MIN_ENTRY = 0.10     # only guard middle-of-market positions
+_MAX_SPREAD_RATIO = 3.0         # ask/bid > this ⇒ quote untrusted
+
+
+def _bid_looks_orphan(bid: float, ask: float, entry_price: float) -> bool:
+    """Return True if the CLOB quote looks like a dust bid on a thin book
+    rather than a real price collapse. Used to suppress false stop-losses.
+    """
+    if entry_price < _BID_FLOOR_MIN_ENTRY:
+        return False   # longshot: 0.01 might be the real price
+    if bid <= 0:
+        return False   # handled by earlier `bid <= 0` guard; not our concern
+    if bid >= entry_price * _BID_FLOOR_RATIO:
+        return False   # bid still within a reasonable range of entry
+    if ask <= 0:
+        return True    # bid far below entry AND no ask — no real market
+    # Bid < 30% of entry. Is ask consistent (real crash) or not (dust)?
+    if ask > bid * _MAX_SPREAD_RATIO:
+        return True    # wide spread → dust bid, not a real collapse
+    return False
+
 
 # ── 1. Stop-loss monitor ──────────────────────────────────────────────────────
 
@@ -107,12 +145,30 @@ async def stop_loss_monitor(
                 if entry_price <= 0 or size_shares <= 0:
                     continue
 
+                # T-48: fetch both bid+ask so we can sanity-check the quote.
+                # Previous code used get_best_bid which returned the raw top-of-book,
+                # even when that was an orphan dust bid on an otherwise thin book.
                 try:
-                    bid = await executor.get_best_bid(token_id)
+                    info = await executor.get_market_info(token_id)
+                    bid = float(info.get("bid") or 0.0)
+                    ask = float(info.get("ask") or 0.0)
                 except Exception:
                     continue
 
                 if bid <= 0:
+                    continue
+
+                if _bid_looks_orphan(bid, ask, entry_price):
+                    # Dust bid on thin book — neither update current_bid nor fire
+                    # stop-loss. Dashboard would otherwise show a phantom -90%
+                    # unrealized loss; risk_guard would have placed a DRY_SELL
+                    # (or real SELL) at 0.01 and locked in the fake loss. Log
+                    # so operator can see the suspicious quote without action.
+                    logger.warning(
+                        "%s: orphan dust quote skipped (bid=%.3f ask=%.3f entry=%.3f) — "
+                        "thin book, not a real collapse",
+                        slug, bid, ask, entry_price,
+                    )
                     continue
 
                 # Cache current_bid so dashboard can compute unrealized P&L

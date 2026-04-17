@@ -17,9 +17,72 @@ import pytest
 
 from trading.risk_guard import (
     _GAME_WINDOW_HOURS,
+    _bid_looks_orphan,
     circuit_breaker_check,
     correlation_check,
 )
+
+
+# ── T-48: _bid_looks_orphan sanity guard ──────────────────────────────────────
+#
+# Observed real cases on paper-trading Mac Mini:
+#  - Atlanta Braves YES entry 0.515, CLOB bid=0.01, ask unknown → false stop-loss
+#  - Seattle Mariners NO entry 0.555, same pattern
+#  - Charlotte Hornets YES entry 0.485, same pattern
+# Without this guard, all three fired -95% stop-losses within 5 min of opening.
+
+
+class TestBidLooksOrphan:
+    def test_healthy_bid_near_entry_is_not_orphan(self):
+        """bid within normal range of entry → not orphan."""
+        assert _bid_looks_orphan(bid=0.48, ask=0.52, entry_price=0.50) is False
+
+    def test_mild_drop_not_orphan(self):
+        """bid down 20% with tight spread → real price move, not dust."""
+        assert _bid_looks_orphan(bid=0.40, ask=0.42, entry_price=0.50) is False
+
+    def test_real_crash_fires_stop_loss(self):
+        """Both sides collapsed — bid and ask both at 0.05 with entry 0.50.
+        This is a legitimate market crash; stop-loss SHOULD fire. Guard
+        must return False (NOT orphan)."""
+        assert _bid_looks_orphan(bid=0.05, ask=0.08, entry_price=0.50) is False
+
+    def test_dust_bid_on_thin_book_is_orphan(self):
+        """bid=0.01 with ask=0.50 (real market-maker quote) — this is the
+        Mac Mini 2026-04-17 case. Bid is an orphan dust order, NOT a real
+        price collapse. Guard must return True to suppress stop-loss."""
+        assert _bid_looks_orphan(bid=0.01, ask=0.50, entry_price=0.515) is True
+
+    def test_dust_bid_wide_spread_realistic_entry(self):
+        """bid=0.02 ask=0.48 entry=0.48 — ask/bid ratio 24, classic thin book."""
+        assert _bid_looks_orphan(bid=0.02, ask=0.48, entry_price=0.48) is True
+
+    def test_bid_far_below_no_ask_is_orphan(self):
+        """If there's no ask at all AND bid is far below entry, we cannot
+        confirm a real crash → assume orphan."""
+        assert _bid_looks_orphan(bid=0.05, ask=0.0, entry_price=0.50) is True
+
+    def test_longshot_position_no_guard(self):
+        """Entry < 0.10 = longshot. 0.01 collapse might be real ('dog lost');
+        we let the stop-loss fire. Guard returns False."""
+        assert _bid_looks_orphan(bid=0.01, ask=0.05, entry_price=0.08) is False
+
+    def test_zero_bid_not_orphan_by_definition(self):
+        """bid<=0 is handled by an earlier guard — this function should
+        return False so it doesn't double-block (let the zero-bid check
+        upstream handle it)."""
+        assert _bid_looks_orphan(bid=0.0, ask=0.5, entry_price=0.50) is False
+        assert _bid_looks_orphan(bid=-0.01, ask=0.5, entry_price=0.50) is False
+
+    def test_exact_boundary_bid_floor(self):
+        """bid exactly at _BID_FLOOR_RATIO (30%) of entry → NOT orphan (at or above
+        floor). Just above should also be not-orphan. Just below is candidate."""
+        # At 30% exactly
+        assert _bid_looks_orphan(bid=0.15, ask=0.50, entry_price=0.50) is False
+        # Just above
+        assert _bid_looks_orphan(bid=0.16, ask=0.50, entry_price=0.50) is False
+        # Just below + wide spread → orphan
+        assert _bid_looks_orphan(bid=0.10, ask=0.50, entry_price=0.50) is True
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
