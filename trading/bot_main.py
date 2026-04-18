@@ -153,6 +153,21 @@ _drift_alerted: dict[str, datetime] = {}
 _last_spike_scan: datetime | None = None
 _spike_alerted: set[int] = set()
 
+# T-50: circuit-breaker alert dedupe. Was firing on every 5-min scan cycle →
+# user's Telegram got ~12 copies of the same "daily loss exceeds limit" alert
+# per hour. Now: one alert per hour regardless of how many cycles trip it.
+_last_cb_alert: datetime | None = None
+_CB_ALERT_INTERVAL_H = 1.0
+
+
+def _should_alert_circuit_breaker() -> bool:
+    global _last_cb_alert
+    now = datetime.now(timezone.utc)
+    if _last_cb_alert is None or (now - _last_cb_alert).total_seconds() / 3600 >= _CB_ALERT_INTERVAL_H:
+        _last_cb_alert = now
+        return True
+    return False
+
 
 def _write_bot_state(balance: float, trading_enabled: bool) -> None:
     """Write current bot state to logs/bot_state.json for the dashboard to read."""
@@ -1240,8 +1255,14 @@ async def run_loop(config: dict) -> None:
                 cb_blocked, cb_reason = await circuit_breaker_check(pool, config)
                 if cb_blocked:
                     logger.warning("Circuit breaker active: %s", cb_reason)
-                    await send_error_alert(tg_token, tg_chat_id,
-                                          f"🚨 Circuit breaker: {cb_reason}\nNo new positions until tomorrow.")
+                    # T-50: strip leading "circuit breaker:" from cb_reason to
+                    # avoid double prefix in Telegram ("Circuit breaker: circuit
+                    # breaker: daily loss ..."). Also dedupe — only alert once
+                    # per hour instead of every 5-min scan cycle.
+                    if _should_alert_circuit_breaker():
+                        reason_clean = cb_reason.removeprefix("circuit breaker: ")
+                        await send_error_alert(tg_token, tg_chat_id,
+                                              f"🚨 Circuit breaker: {reason_clean}\nNo new positions until tomorrow.")
                     await asyncio.sleep(scan_interval)
                     continue
 
