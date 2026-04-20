@@ -60,11 +60,39 @@ async def check_and_exit(
             continue
 
         try:
-            # Get live best bid for exit price
-            best_bid = await executor.get_best_bid(token_id)
+            # T-51: auto-exit cannot skip (game about to start) but we must
+            # avoid selling at a dust bid on a thin pre-game book. Unlike
+            # risk_guard (T-48) and stagnation (T-49) which skip when orphan
+            # is detected, here we fall back to entry_price — "break-even
+            # close" — because closing at $0.01 on an otherwise 50¢ market
+            # books a phantom 95% loss that never happened. Entry_price is
+            # the most honest "we don't know the real exit" fallback: better
+            # to record a wash trade than manufacture fake P&L.
+            entry_price = float(pos["entry_price"] or 0.01)
+            try:
+                info = await executor.get_market_info(token_id)
+                best_bid = float(info.get("bid") or 0.0)
+                ask = float(info.get("ask") or 0.0)
+            except Exception:
+                best_bid = await executor.get_best_bid(token_id)
+                ask = 0.0
+
+            fallback_reason = None
             if best_bid <= 0:
-                best_bid = float(pos["entry_price"] or 0.01)
-                logger.warning("Position %d: no bid found, using entry_price %.4f", position_id, best_bid)
+                best_bid = entry_price
+                fallback_reason = "no bid on book"
+            elif bid_looks_orphan(best_bid, ask, entry_price):
+                logger.warning(
+                    "Position %d (%s): auto-exit via entry_price fallback — "
+                    "orphan dust quote at game time (bid=%.3f ask=%.3f entry=%.3f)",
+                    position_id, slug, best_bid, ask, entry_price,
+                )
+                best_bid = entry_price
+                fallback_reason = "orphan dust bid"
+
+            if fallback_reason:
+                logger.info("Position %d: using entry_price %.4f (%s)",
+                            position_id, best_bid, fallback_reason)
 
             # Place sell order
             sell_result = await executor.sell(token_id, best_bid, size_shares)
