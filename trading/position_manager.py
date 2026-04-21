@@ -255,17 +255,44 @@ def _resolve_yes_no_teams_from_text(
         return None, None
     text_lower = text.lower()
 
+    # T-54: track the character spans of already-matched aliases so that a
+    # shorter alias can't match INSIDE a longer alias we already took.
+    # Length-descending iteration alone does not prevent this:
+    # for "Spread: Hornets (-3.5)", "hornets" matches at pos 8-15, and then
+    # "nets" matches at pos 11-15 INSIDE that same word. Without the span
+    # guard we'd report a Hornets-vs-Nets market that never existed — which
+    # is exactly what happened to all 7 tanking positions (market 1999250)
+    # before this fix.
     matches: list[tuple[int, str]] = []  # (position_in_text, canonical_name)
     seen_canonical: set[str] = set()
+    used_spans: list[tuple[int, int]] = []
     for alias in sorted(aliases.keys(), key=len, reverse=True):
         canonical = aliases[alias]
         if canonical in seen_canonical:
             continue
-        pos = text_lower.find(alias)
-        if pos < 0:
+        # Scan ALL occurrences of `alias` and pick the first one that doesn't
+        # overlap with any already-claimed span. For "Hornets vs. Nets",
+        # `alias="nets"` finds "nets" first INSIDE "Hornets" (overlapping
+        # the Charlotte Hornets claim) AND later as its own word — we must
+        # keep searching past the overlapping hit to find the second one.
+        start_search = 0
+        clean_pos = -1
+        while True:
+            pos = text_lower.find(alias, start_search)
+            if pos < 0:
+                break
+            end = pos + len(alias)
+            if any(not (end <= s or pos >= e) for s, e in used_spans):
+                start_search = pos + 1   # try the next occurrence
+                continue
+            clean_pos = pos
+            break
+        if clean_pos < 0:
             continue
-        matches.append((pos, canonical))
+        end = clean_pos + len(alias)
+        matches.append((clean_pos, canonical))
         seen_canonical.add(canonical)
+        used_spans.append((clean_pos, end))
         if len(matches) == 2:
             break
 

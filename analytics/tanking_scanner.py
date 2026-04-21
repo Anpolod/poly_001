@@ -340,15 +340,42 @@ def match_teams_in_question(
     (e.g. "lakers" matching before "los angeles lakers").
     """
     q = question.lower()
-    # Sort by alias length descending so longer aliases win
+    # T-54: length-descending order is not enough — we also have to track the
+    # character spans of already-matched aliases so a shorter alias cannot
+    # match INSIDE a longer alias we already claimed. For "Spread: Hornets
+    # (-3.5)" the naive substring search finds "hornets" AND then "nets"
+    # (inside the same word), returning a phantom Hornets-vs-Nets pair for
+    # a game that was actually Charlotte vs Orlando. All 7 tanking positions
+    # on market 1999250 were opened because of exactly this bug.
     matched_canonical: list[str] = []
     seen_canonical: set[str] = set()
+    used_spans: list[tuple[int, int]] = []
 
     for alias in sorted(aliases.keys(), key=len, reverse=True):
         canonical = aliases[alias]
-        if alias in q and canonical not in seen_canonical:
-            matched_canonical.append(canonical)
-            seen_canonical.add(canonical)
+        if canonical in seen_canonical:
+            continue
+        # Scan ALL occurrences of `alias` and pick the first non-overlapping
+        # one. See matching helper in trading/position_manager.py for the
+        # rationale — both functions must handle "Hornets vs. Nets" (where
+        # "nets" appears twice: inside "Hornets" and as its own word).
+        start_search = 0
+        clean_start = -1
+        while True:
+            pos = q.find(alias, start_search)
+            if pos < 0:
+                break
+            end = pos + len(alias)
+            if any(not (end <= s or pos >= e) for s, e in used_spans):
+                start_search = pos + 1   # try the next occurrence
+                continue
+            clean_start = pos
+            break
+        if clean_start < 0:
+            continue
+        matched_canonical.append(canonical)
+        seen_canonical.add(canonical)
+        used_spans.append((clean_start, clean_start + len(alias)))
         if len(matched_canonical) == 2:
             break
 

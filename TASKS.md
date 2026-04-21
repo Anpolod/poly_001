@@ -261,6 +261,42 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-54 · Team-match substring overlap bug (Hornets ⊃ Nets) ✅
+**Status:** DONE — 2026-04-21
+**Источник:** post-mortem 2026-04-21 7 tanking позиций, которые все оказались на одном и том же рынке `nba-cha-orl-2026-04-17-spread-away-3pt5`.
+**Время:** ~45 мин
+**Реальный импакт:** все 7 tanking позиций (ids 1, 4, 7, 10, 13, 15, 17) были открыты потому что scanner думал это матч Charlotte vs Brooklyn, хотя игра была Charlotte vs Orlando.
+
+**Баг:**
+Функции `match_teams_in_question` ([analytics/tanking_scanner.py](analytics/tanking_scanner.py#L332)) и `_resolve_yes_no_teams_from_text` ([trading/position_manager.py](trading/position_manager.py#L238)) делают substring-матч алиасов команд в тексте вопроса. Для spread-рынка с question `"Spread: Hornets (-3.5)"` происходит:
+1. `"hornets"` матчится на позиции 8-15 → Charlotte Hornets ✅
+2. `"nets"` матчится на позиции 11-15 — ВНУТРИ того же слова "hornets" → phantom Brooklyn Nets ❌
+3. Возвращается phantom пара `(Charlotte, Brooklyn)` для одной-team'овой spread-вопроса
+
+Length-descending sort (который был в коде) не спасает — matches внутри уже-найденного слова всё равно триггерятся. Комментарий в `config/nba_team_aliases.yaml` (строка 20-21) предупреждал ("nets is a substring of hornets") но предложенный фикс решал только part из проблемы.
+
+**Fix:**
+Добавил span-tracking в обе функции. После матча alias'а claim'ится его char-span `[start, end)`; subsequent alias matches скипаются если overlap'ятся с any claimed span. Критический нюанс: Python `str.find(alias)` возвращает первое occurrence. Для "Hornets vs. Nets" это bytes 3-7 (внутри "Hornets"), что теперь overlap'ается с claim Charlotte; нужно сканировать ВСЕ occurrences и выбрать первый non-overlapping. Добавил while-loop в обе функции.
+
+**Новые тесты** (4 регрессионных в [tests/test_resolve_team_token.py](tests/test_resolve_team_token.py)):
+- `test_resolve_hornets_only_question_does_not_hallucinate_nets` — "Spread: Hornets (-3.5)" → (None, None), not (Charlotte, Brooklyn)
+- `test_resolve_nets_in_own_word_still_matches` — "Brooklyn Nets beat Boston Celtics" still parses both
+- `test_match_teams_hornets_only_question_does_not_hallucinate_nets` — same for match_teams_in_question
+- `test_match_teams_standard_hornets_vs_nets_still_returns_both` — "Hornets vs. Nets" returns both, overlap guard doesn't suppress legit second match
+- `test_match_teams_nets_only_spread_does_not_hallucinate_hornets` — symmetric case
+
+**Verification:**
+- 20/20 in `test_resolve_team_token.py` pass (14 existing + 6 new)
+- Full suite 254/254 pass
+
+**Сколько ещё таких кейсов?**
+Проверил NBA aliases — "nets in hornets" единственная substring-collision. Но теперь фикс универсальный: любая similar будущая коллизия (если добавим teams с overlapping именами, e.g. cross-league MLB vs NBA) автоматически покрыта.
+
+**Impact на стратегию:**
+Агент первоначально предлагал disable tanking_scanner по образцу T-52, но это было преждевременно — N=1 market не dataset для strategy verdict. После фикса scanner вернёт `teams=[Charlotte Hornets]` (len=1) для этой spread-question → scan loop skip'нёт market (line 453: `if len(teams) < 2: continue`), signal не генерится, no phantom position. Tanking стратегия сама по себе **не disabled**.
+
+---
+
 ### T-52 · Ask-orphan entry guard + pitcher scanner disabled ✅
 **Status:** DONE — 2026-04-21
 **Источник:** post-mortem 2026-04-21 закрытых позиций 18-27. Два раздельных провала.

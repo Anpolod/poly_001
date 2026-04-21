@@ -87,6 +87,67 @@ def test_resolve_substring_trap_nets_vs_hornets() -> None:
     assert no == "Brooklyn Nets"
 
 
+def test_resolve_hornets_only_question_does_not_hallucinate_nets() -> None:
+    """T-54 regression: spread questions like 'Spread: Hornets (-3.5)' mention
+    only ONE team. Before the span-overlap fix, `hornets` matched and then
+    `nets` ALSO matched inside the same word, producing a phantom
+    Charlotte-Hornets-vs-Brooklyn-Nets pair for a game that was actually
+    Charlotte vs Orlando. This caused all 7 tanking positions on market
+    1999250 to open against the wrong market thesis."""
+    yes, no = _resolve_yes_no_teams_from_text("Spread: Hornets (-3.5)", _NBA_ALIASES)
+    assert yes is None, f"expected no pair for single-team question, got YES={yes}"
+    assert no is None
+
+
+def test_resolve_nets_in_own_word_still_matches() -> None:
+    """Regression guard: the span-overlap fix must not break legitimate
+    Brooklyn Nets matches. A question that mentions Nets as its own word
+    (not inside Hornets) should still parse correctly."""
+    yes, no = _resolve_yes_no_teams_from_text(
+        "Will the Brooklyn Nets beat the Boston Celtics?", _NBA_ALIASES
+    )
+    assert yes == "Brooklyn Nets"
+    assert no == "Boston Celtics"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# match_teams_in_question — T-54 span-overlap fix (mirror of the function in
+# tanking_scanner.py that has the same substring-trap bug). Lives here because
+# the bug is symmetric — both functions parse team names from the same text.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_match_teams_hornets_only_question_does_not_hallucinate_nets() -> None:
+    """T-54 regression: match_teams_in_question("Spread: Hornets (-3.5)")
+    must return [Charlotte Hornets] with length 1, NOT a bogus pair of
+    (Charlotte Hornets, Brooklyn Nets). The tanking scanner filters out
+    markets with len(teams) < 2 — before the fix, this market slipped
+    through because "nets" matched inside "hornets"."""
+    from analytics.tanking_scanner import match_teams_in_question
+
+    teams = match_teams_in_question("Spread: Hornets (-3.5)", _NBA_ALIASES)
+    assert teams == ["Charlotte Hornets"]
+
+
+def test_match_teams_standard_hornets_vs_nets_still_returns_both() -> None:
+    """Regression guard: legitimate Hornets-vs-Nets question still parses
+    both teams. The fix is about overlap, not about suppressing Brooklyn."""
+    from analytics.tanking_scanner import match_teams_in_question
+
+    teams = match_teams_in_question("Hornets vs. Nets", _NBA_ALIASES)
+    assert sorted(teams) == ["Brooklyn Nets", "Charlotte Hornets"]
+
+
+def test_match_teams_nets_only_spread_does_not_hallucinate_hornets() -> None:
+    """Symmetric case: a Nets-only spread question should NOT inject
+    Hornets. Overlap guard is symmetric — we claim span for 'nets' so
+    subsequent matches don't steal it, and 'hornets' isn't in 'nets'."""
+    from analytics.tanking_scanner import match_teams_in_question
+
+    teams = match_teams_in_question("Spread: Nets (-3.5)", _NBA_ALIASES)
+    assert teams == ["Brooklyn Nets"]
+
+
 def test_resolve_full_question_form() -> None:
     """Handles 'Will the X beat the Y?' phrasing — X still appears first."""
     yes, no = _resolve_yes_no_teams_from_text(
