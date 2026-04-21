@@ -261,6 +261,49 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-55 · Persist tanking signals → enable future backtest ✅
+**Status:** DONE — 2026-04-21
+**Источник:** T-54 post-mortem обнаружил что `tanking_signals` таблица **пустая** (0 rows) несмотря на то что tanking scanner работает в bot_main с 2026-04-14. Следствие — strategy вообще не может быть backtested через `paper_trade_signals --signal-type tanking` (хотя инфра уже есть).
+**Время:** ~15 мин
+**Verdict:** не validation-result (rollback time'а нет), а **enablement** — подготовка инфры для forward backtest'а через 2-3 дня аккумуляции данных.
+
+**Проблема:**
+`analytics/tanking_scanner.py` имеет `log_signals_to_db` функцию, но bot_main её не вызывал — tanking scanner был integrated inline (не через отдельный daemon как `mlb_scanner`, который гоняется watchdog'ом с `--save`). Pitcher signals аккумулируются через mlb_scanner daemon (170 rows сегодня); tanking нет потому что нет аналогичного daemon'а, а bot_main забывал persist.
+
+**Fix (T-55) — 2 изменения:**
+
+1. Import `log_signals_to_db as persist_tanking_signals` в `trading/bot_main.py` (alias чтобы не конфликтовать с других scanners' `log_signals_to_db`)
+
+2. Вызов `persist_tanking_signals(pool, tanking_signals)` сразу после `scan_tanking_patterns`, перед `_process_tanking_signal` loop. Обёрнут в `try/except logger.warning` — persistence не должен блокировать signal generation.
+
+**Дизайн choice:**
+Persist'им ВСЕ signals (HIGH/MODERATE/WATCH, BUY/WATCH), не только actionable. Причина — backtester может filter'нуть при replay (`paper_trade_signals --strength all`), но данные которые не persisted — навсегда потеряны. Больше данных → tighter confidence intervals.
+
+**Что с существующими 0 rows:**
+Нет retroactive recovery — bot'у предстоит 2-3 дня аккумулировать signals на clean data (после T-54 substring bug fix от 2026-04-21 scanner'ы не будут генерить phantom Hornets/Nets signals). Expected accumulation rate: ~10-20 signals/day на MLB/NBA в сезон.
+
+**Backtest pipeline (ready to use через 2-3 дня):**
+```bash
+python -m analytics.paper_trade_signals \
+    --signal-type tanking --strength all \
+    --exit-model resolution \
+    --position-size 10
+```
+Через 2-3 дня:
+- Если CI_lo > 50% → re-examine tanking_scanner.enabled (already enabled; reaffirm)
+- Если CI_hi < 50% → disable как pitcher (T-52 pattern)
+- Если inconclusive → накапливать больше
+
+**Verification:**
+- `venv/bin/python -c "import ast; ast.parse(open('trading/bot_main.py').read())"` → syntax OK
+- 255/255 tests pass (no new tests — one-line wrapper around already-tested `log_signals_to_db`)
+
+**Explicit non-goals:**
+- Не создаём отдельный tanking_scanner daemon (как mlb_scanner в watchdog). bot_main inline достаточно — сканирование происходит каждый scan cycle, same cadence что и pitcher_scanner был pre-T-52.
+- Не форсим retroactive data (historical_fetcher или re-scan). Post-T-54 fresh data будет cleaner чем pre-T-54 recon.
+
+---
+
 ### T-53 · Pitcher signal backtest — held-to-resolution P&L ✅
 **Status:** DONE — 2026-04-21
 **Gate для:** можно ли re-enable `mlb_pitcher_scanner.enabled` в config (отключён в T-52).

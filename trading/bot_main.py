@@ -49,6 +49,7 @@ from analytics.tanking_scanner import (  # noqa: E402
     enrich_with_lineup_news,
     get_standings,
     load_aliases,
+    log_signals_to_db as persist_tanking_signals,
     scan_tanking_patterns,
 )
 from analytics.injury_scanner import (  # noqa: E402
@@ -1163,6 +1164,20 @@ async def run_loop(config: dict) -> None:
                                 if s.pattern_strength == "HIGH" and s.recommended_action == "BUY"]
                 if high_signals:
                     await enrich_with_lineup_news(high_signals, http_session)
+
+                # T-55: persist tanking signals so paper_trade_signals
+                # --signal-type tanking can backtest them later. Previously
+                # only pitcher_signals were persisted (via the separate
+                # mlb_scanner daemon); tanking lived only in-process in
+                # bot_main and tanking_signals table was always empty,
+                # leaving the strategy untestable. Failures are non-fatal —
+                # log and move on, signal-generation is more important than
+                # signal-archival.
+                if tanking_signals:
+                    try:
+                        await persist_tanking_signals(pool, tanking_signals)
+                    except Exception as exc:
+                        logger.warning("Failed to persist tanking_signals: %s", exc)
 
                 # 3. Scan MLB pitcher signals
                 mlb_cfg = config.get("mlb_pitcher_scanner", {})
