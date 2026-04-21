@@ -261,6 +261,46 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-52 · Ask-orphan entry guard + pitcher scanner disabled ✅
+**Status:** DONE — 2026-04-21
+**Источник:** post-mortem 2026-04-21 закрытых позиций 18-27. Два раздельных провала.
+**Время:** ~60 мин
+
+**Проблема 1 — стратегия pitcher сама по себе сломана:**
+7 из 10 pitcher-сделок были бы убыточными даже если держать до резолюции. Positions 18-23 (6 подряд) ставили NO, игры выиграл YES. Положительный P&L только на 3 из 10. Pitcher-backtest'а в репо нет — ERA-diff edge постулируется в `analytics/mlb_pitcher_scanner.py`, не валидирован.
+
+**Проблема 2 — entry_price — фикция:**
+Заходим за 17+ часов до игры. В это время MLB-рынок мёртв: `bid=0.01 ask=0.99 mid=0.50`. Бот пишет `entry_price = signal_price` (mid трупа). Exit-path защищён `bid_looks_orphan` (T-48/T-49/T-51), но **входили без симметричной защиты** — dry_run принимал любую цену без проверки реального orderbook'а, что создавало phantom fills.
+
+**Fix (T-52) — четыре изменения:**
+
+1. **P0 — kill switch:** `mlb_pitcher_scanner.enabled: false` в `config/settings.yaml`. Re-enable только после validation backtest'а с win-rate > 52%.
+
+2. **P1a — `ask_looks_orphan(bid, ask, signal_price)`** в [trading/risk_guard.py](trading/risk_guard.py). Зеркало `bid_looks_orphan` через `(1 - price)` complement — честная математика для favorites и underdogs одновременно. Вызывается из [trading/entry_filter.py](trading/entry_filter.py) → decision="skip" (не "limit") на orphan books. Документированное изменение философии: ранее (1a9e2d9) dead market → limit, теперь orphan → skip.
+
+3. **P1b — `clob_executor.buy` dry_run reachability check:** если `price < live_ask - 0.20` → reject. Belt-and-suspenders к P1a на случай если signal-emitter уже получил dust-ask bypass.
+
+4. **P2 — `hours_to_game <= 6.0`** gate для pitcher signals в [trading/bot_main.py](trading/bot_main.py). MLB pre-game books оживают только в последние несколько часов. Configurable: `mlb_pitcher_scanner.max_hours_to_game`.
+
+**Новые тесты** (11 total: 10 `TestAskLooksOrphan` + 2 entry_filter orphan cases + 2 обновлённые dead-ask):
+- Mirror coverage `TestBidLooksOrphan` — healthy/dust/longshot/near-certain-favorite/degenerate cases
+- `test_orphan_ask_on_favorite_still_skips` — favorite signal (0.85) с dead book должен skip
+- `test_dead_ask_on_realistic_mlb_signal_skips` — обновлён с "limit" на "skip" под новую философию
+- `test_mirror_of_bid_case_symmetric` — санити: для signal=0.50 условия на orphan симметричны
+
+**Verification:**
+- 250/250 Python tests pass (1 новый `TestFormatMarketStatus` update под изменённую философию)
+- Open positions 28, 29: T-51 validate'ит fallback на entry_price в auto-exit (в пути, game_start позже сегодня)
+- В следующей сессии: T-53 — pitcher backtest на `historical_calibration`. Не re-enable'ить `mlb_pitcher_scanner.enabled` до этого.
+- В следующей сессии: T-54 — post-mortem tanking (7/7 позиций закрыты на phantom — реальный P&L неизвестен).
+
+**Explicit non-goals:**
+- Backtest pitcher-edge'а (P3) — отдельная сессия, ~100 строк кода
+- `max_hours_to_game` для других сигналов (tanking, calibration, drift) — pitcher был worst-case; другие покажутся в post-mortem T-54
+- Ribbon-guard на non-orphan "limit" decisions (wide spread, thin depth) — эти случаи уже рационально отправляют GTC в live; dry_run accounting fiction там менее серьёзна
+
+---
+
 ### T-46 · Watchdog self-reload on watchdog.sh mtime change ✅
 **Status:** DONE — 2026-04-17
 **Источник:** post-ship observation 2026-04-17. Bot running stale code 22+ hours after multiple pulls.

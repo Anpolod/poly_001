@@ -92,6 +92,42 @@ def bid_looks_orphan(bid: float, ask: float, entry_price: float) -> bool:
     return False
 
 
+# ── T-52: ask sanity — symmetric entry-side guard ────────────────────────────
+# Post-mortem of pitcher-signal losses showed a second failure mode: we were
+# entering positions 12-17h before game_start, when the book is still
+# bid=0.01 ask=0.99 (dead). `entry_filter.check_entry` routed these to
+# decision="limit" — in live trading that means a GTC at signal_price which
+# never fills, but in dry_run the fake fill at signal_price lied to the
+# accounting. Had it been live, we would have filled at ask=0.99 for
+# something worth ~0.50 — an instant 98% paper loss.
+#
+# Rule: mirror of bid_looks_orphan on the (1 - price) complement so the
+# math stays honest across favorites (signal > 0.5) AND underdogs
+# (signal < 0.5). A healthy book has ask near signal_price; an orphan book
+# has ask near 1.0 with nothing else between signal and ask.
+_ASK_FLOOR_RATIO_COMPLEMENT = 0.3
+
+
+def ask_looks_orphan(bid: float, ask: float, signal_price: float) -> bool:
+    """Return True if the ask looks like a dust placeholder at the top of a
+    thin pre-game book rather than a real seller. Used at ENTRY to refuse
+    trading into books that have no real counterparty.
+    """
+    if signal_price < _BID_FLOOR_MIN_ENTRY:
+        return False   # longshot — wide books are expected
+    if ask <= 0 or ask >= 1.0:
+        return False   # degenerate quote — not our concern here
+    ask_comp = 1.0 - ask
+    sig_comp = 1.0 - signal_price
+    if ask_comp >= sig_comp * _ASK_FLOOR_RATIO_COMPLEMENT:
+        return False   # ask still within a reasonable range of signal
+    if bid <= 0:
+        return True    # extreme ask AND no bid — no real market
+    if ask > bid * _MAX_SPREAD_RATIO:
+        return True    # wide spread → dust ask, not a real price
+    return False
+
+
 # ── 1. Stop-loss monitor ──────────────────────────────────────────────────────
 
 async def stop_loss_monitor(

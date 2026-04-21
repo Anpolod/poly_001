@@ -107,13 +107,22 @@ prop_scanner:
   hours_window: 24            # only games starting within N hours
 
 mlb_pitcher_scanner:
-  enabled: true               # T-45: gate for start_bot.sh + watchdog daemon
+  # T-52: disabled until pitcher edge is validated on historical_calibration.
+  # Post-mortem 2026-04-21 of positions 18-27 showed 7/10 would have lost
+  # money even at honest exit prices — the signal picked wrong sides, not
+  # just got hurt by the dust-bid exit bug. Re-enable only after backtester
+  # proves win-rate > 52% on out-of-sample data. See T-53.
+  enabled: false              # T-45: gate for start_bot.sh + watchdog daemon
                               # (pre-T-45 the scanner was always launched,
                               #  ignoring this flag — operators on non-MLB
                               #  deployments got unsolicited ESPN traffic and
                               #  pitcher_signals writes)
   min_era_differential: 1.0   # only alert on ERA gap >= this
   hours_window: 48            # only games starting within N hours
+  max_hours_to_game: 6.0      # T-52: skip signals if game too far — pre-game
+                              # MLB books are dead (bid=0.01 ask=0.99) until
+                              # a few hours before first pitch. Signal's
+                              # "entry_price" at T-12h has no real counterparty.
 
 trading:
   enabled: false              # set true to enable live order placement

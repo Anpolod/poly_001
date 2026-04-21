@@ -10,14 +10,17 @@ Criteria for entry:
   4. ask ≤ signal_price × 1.15  — live price not >15% above our signal
   5. ask_depth_usd ≥ min_depth  — enough in ask side to fill our size
   6. hours_to_game > min_hours  — not entering at the last minute
+  7. NOT ask_looks_orphan — book has a real counterparty at a plausible price
 
 Returns (is_liquid: bool, reason: str, emoji: str)
   🟢 — enter now at live ask
   🟡 — place limit order at signal_price and wait
-  🔴 — skip (game too close, price too far from signal)
+  🔴 — skip (game too close, price too far from signal, orphan ask)
 """
 
 from __future__ import annotations
+
+from trading.risk_guard import ask_looks_orphan
 
 
 _MAX_SPREAD = 0.20          # cents between bid and ask
@@ -44,6 +47,17 @@ def check_entry(
     # Hard skips — conditions where we should not enter at all
     if hours_to_game < _MIN_HOURS_TO_GAME:
         return "skip", f"game starts in {hours_to_game:.1f}h (< {_MIN_HOURS_TO_GAME}h)", "🔴"
+
+    # T-52: orphan-ask hard skip — the book has no real seller near fair
+    # value. Placing a GTC limit at signal_price would sit forever (no
+    # counterparty) in live mode, and in dry_run it would fake-fill and
+    # record a fictional entry_price. Correct response: skip, not limit.
+    if ask_looks_orphan(bid, ask, signal_price):
+        return (
+            "skip",
+            f"orphan ask {ask:.3f} vs signal {signal_price:.3f} (bid {bid:.3f}) — dead book",
+            "🔴",
+        )
 
     # Thin / dead market check runs BEFORE the ratio check. An ask at 0.99 is
     # a placeholder level (no real sellers near fair value), not a statement

@@ -114,9 +114,37 @@ class ClobExecutor:
     # ------------------------------------------------------------------
 
     async def buy(self, token_id: str, price: float, size_usd: float) -> dict:
-        """Place a GTC limit BUY order (no-op in dry_run mode)."""
+        """Place a GTC limit BUY order (no-op in dry_run mode).
+
+        T-52: in dry_run, rejects unreachable prices so the fake fill doesn't
+        lie. If the live ask is far above the requested price, a live order
+        would sit unfilled — recording it as a fake fill at `price` produces
+        phantom entry_price that corrupts P&L downstream. Belt-and-suspenders
+        to entry_filter.ask_looks_orphan.
+        """
         size_shares = round(size_usd / price, 2)
         if self.dry_run:
+            live_ask = 0.0
+            try:
+                info = await self.get_market_info(token_id)
+                live_ask = float(info.get("ask") or 0.0)
+            except Exception:
+                pass   # best-effort; don't block dry_run on transient errors
+            # Reject if our price sits > 20¢ below live ask — at that gap
+            # a GTC limit essentially never matches on thin pre-game books,
+            # so fake-filling at `price` would produce fictional accounting.
+            # Normal spreads (< 20¢) still pass through.
+            if live_ask > 0 and price < live_ask - 0.20:
+                logger.warning(
+                    "[DRY RUN] BUY rejected: price %.4f unreachable (live ask %.4f) — %s",
+                    price, live_ask, token_id[:16],
+                )
+                return {
+                    "order_id": "",
+                    "status": "rejected",
+                    "error": f"dry_run: price {price:.4f} far below live ask {live_ask:.4f}",
+                    "raw": {},
+                }
             fake_id = f"DRY_{token_id[:8]}_{int(price*1000)}"
             logger.info("[DRY RUN] BUY skipped: %s  %s shares @ %.4f  fake_id=%s",
                         token_id[:16], size_shares, price, fake_id)

@@ -1185,11 +1185,17 @@ async def run_loop(config: dict) -> None:
                                 min_era_diff=mlb_cfg.get("min_era_differential", 1.0),
                                 hours=mlb_cfg.get("hours_window", 48),
                             )
+                            # T-52: cap time-to-game. Pre-game MLB books are
+                            # almost always bid=0.01 ask=0.99 more than ~6h
+                            # before first pitch, so signals emitted earlier
+                            # have no real entry price. See TASKS.md T-52.
+                            max_hours = float(mlb_cfg.get("max_hours_to_game", 6.0))
                             pitcher_signals = [
                                 s for s in all_pitcher
                                 if s.signal_strength in ("HIGH", "MODERATE")
                                 and s.recommended_action == "BUY"
                                 and s.market_id  # has a Polymarket market
+                                and s.hours_to_game <= max_hours
                             ]
                     except asyncio.TimeoutError:
                         logger.warning("MLB pitcher scan timed out — skipping this cycle")

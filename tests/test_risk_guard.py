@@ -17,6 +17,7 @@ import pytest
 
 from trading.risk_guard import (
     _GAME_WINDOW_HOURS,
+    ask_looks_orphan,
     bid_looks_orphan,
     circuit_breaker_check,
     correlation_check,
@@ -83,6 +84,62 @@ class TestBidLooksOrphan:
         assert bid_looks_orphan(bid=0.16, ask=0.50, entry_price=0.50) is False
         # Just below + wide spread → orphan
         assert bid_looks_orphan(bid=0.10, ask=0.50, entry_price=0.50) is True
+
+
+# ── T-52: ask_looks_orphan — symmetric entry-side guard ──────────────────────
+#
+# Post-mortem of pitcher-signal losses (positions 18-25) showed entry at
+# signal_price 0.485-0.615 on dead books (bid=0.01 ask=0.99). Had those
+# been live trades instead of dry_run paper, we would have bought at 0.99
+# for something worth ~0.50 — an instant 98% paper loss. This guard blocks
+# entry into those books at the source, not just exits from them.
+
+
+class TestAskLooksOrphan:
+    def test_healthy_ask_near_signal_is_not_orphan(self):
+        """ask within normal range of signal → not orphan."""
+        assert ask_looks_orphan(bid=0.48, ask=0.52, signal_price=0.50) is False
+
+    def test_mild_overprice_not_orphan(self):
+        """ask 10% above signal with tight spread → real overpricing, not dust."""
+        assert ask_looks_orphan(bid=0.52, ask=0.55, signal_price=0.50) is False
+
+    def test_dust_ask_on_thin_book_is_orphan(self):
+        """The 2026-04-21 pitcher-signal case: bid=0.01 ask=0.99 signal=0.50.
+        Classic dead book; entry must be refused. Guard returns True."""
+        assert ask_looks_orphan(bid=0.01, ask=0.99, signal_price=0.50) is True
+
+    def test_dead_book_on_favorite_is_orphan(self):
+        """Favorite signal 0.85 with bid=0.01 ask=0.99 — still a dead book;
+        1-ask=0.01 is tiny relative to 1-signal=0.15."""
+        assert ask_looks_orphan(bid=0.01, ask=0.99, signal_price=0.85) is True
+
+    def test_near_certain_favorite_tight_book_not_orphan(self):
+        """Favorite signal 0.92 with tight real book bid=0.90 ask=0.94 —
+        ask_comp=0.06 vs sig_comp=0.08, ratio 0.75, not orphan."""
+        assert ask_looks_orphan(bid=0.90, ask=0.94, signal_price=0.92) is False
+
+    def test_dust_ask_no_bid_is_orphan(self):
+        """ask 0.99 and no bid at all — clearly no market."""
+        assert ask_looks_orphan(bid=0.0, ask=0.99, signal_price=0.50) is True
+
+    def test_longshot_signal_no_guard(self):
+        """Signal < 0.10 is a longshot — wide ask is normal, don't guard."""
+        assert ask_looks_orphan(bid=0.01, ask=0.99, signal_price=0.08) is False
+
+    def test_degenerate_ask_zero(self):
+        """ask=0 means no ask on book — handled by an upstream check, not ours."""
+        assert ask_looks_orphan(bid=0.40, ask=0.0, signal_price=0.50) is False
+
+    def test_degenerate_ask_one(self):
+        """ask=1.0 means CLOB shows no seller at any price — treat as degenerate."""
+        assert ask_looks_orphan(bid=0.40, ask=1.0, signal_price=0.50) is False
+
+    def test_mirror_of_bid_case_symmetric(self):
+        """Sanity: for signal=0.50, the orphan condition on ask should mirror
+        the bid case — complement-of-0.99 is 0.01, same as dust bid at 0.01."""
+        assert ask_looks_orphan(bid=0.01, ask=0.99, signal_price=0.50) is True
+        assert bid_looks_orphan(bid=0.01, ask=0.99, entry_price=0.50) is True
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
