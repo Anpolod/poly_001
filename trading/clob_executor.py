@@ -124,17 +124,42 @@ class ClobExecutor:
         """
         size_shares = round(size_usd / price, 2)
         if self.dry_run:
-            live_ask = 0.0
+            # T-56: must fail-closed when we cannot verify the live ask.
+            # Previous logic silently ignored get_market_info failures and
+            # fake-filled anyway, which is the exact degraded-dependency
+            # corner T-52 tried to protect against. If CLOB is flaky and
+            # the fetch raises / returns no ask, refuse to record a fill —
+            # otherwise paper P&L gets corrupted with entries that had no
+            # way to actually execute.
             try:
                 info = await self.get_market_info(token_id)
                 live_ask = float(info.get("ask") or 0.0)
-            except Exception:
-                pass   # best-effort; don't block dry_run on transient errors
+            except Exception as exc:
+                logger.warning(
+                    "[DRY RUN] BUY rejected: could not verify live ask (%s) — %s",
+                    exc, token_id[:16],
+                )
+                return {
+                    "order_id": "",
+                    "status": "rejected",
+                    "error": f"dry_run: live ask lookup failed ({exc})",
+                    "raw": {},
+                }
+            if live_ask <= 0:
+                logger.warning(
+                    "[DRY RUN] BUY rejected: no ask on book for %s", token_id[:16],
+                )
+                return {
+                    "order_id": "",
+                    "status": "rejected",
+                    "error": "dry_run: no live ask (empty book)",
+                    "raw": {},
+                }
             # Reject if our price sits > 20¢ below live ask — at that gap
             # a GTC limit essentially never matches on thin pre-game books,
             # so fake-filling at `price` would produce fictional accounting.
             # Normal spreads (< 20¢) still pass through.
-            if live_ask > 0 and price < live_ask - 0.20:
+            if price < live_ask - 0.20:
                 logger.warning(
                     "[DRY RUN] BUY rejected: price %.4f unreachable (live ask %.4f) — %s",
                     price, live_ask, token_id[:16],

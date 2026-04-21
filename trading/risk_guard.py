@@ -101,11 +101,13 @@ def bid_looks_orphan(bid: float, ask: float, entry_price: float) -> bool:
 # accounting. Had it been live, we would have filled at ask=0.99 for
 # something worth ~0.50 — an instant 98% paper loss.
 #
-# Rule: mirror of bid_looks_orphan on the (1 - price) complement so the
-# math stays honest across favorites (signal > 0.5) AND underdogs
-# (signal < 0.5). A healthy book has ask near signal_price; an orphan book
-# has ask near 1.0 with nothing else between signal and ask.
-_ASK_FLOOR_RATIO_COMPLEMENT = 0.3
+# T-56: implemented as a strict complement of bid_looks_orphan so the
+# mirror claim in the comment is mechanical rather than hand-tuned. For a
+# market where YES trades around signal_price, the NO-side bid is (1-ask)
+# and the NO-side "entry" is (1-signal_price); calling bid_looks_orphan on
+# those complement values answers the same "is the contract we want to buy
+# trading in a dead book?" question symmetrically across favorites,
+# underdogs, and longshots.
 
 
 def ask_looks_orphan(bid: float, ask: float, signal_price: float) -> bool:
@@ -113,19 +115,15 @@ def ask_looks_orphan(bid: float, ask: float, signal_price: float) -> bool:
     thin pre-game book rather than a real seller. Used at ENTRY to refuse
     trading into books that have no real counterparty.
     """
-    if signal_price < _BID_FLOOR_MIN_ENTRY:
-        return False   # longshot — wide books are expected
     if ask <= 0 or ask >= 1.0:
         return False   # degenerate quote — not our concern here
-    ask_comp = 1.0 - ask
-    sig_comp = 1.0 - signal_price
-    if ask_comp >= sig_comp * _ASK_FLOOR_RATIO_COMPLEMENT:
-        return False   # ask still within a reasonable range of signal
-    if bid <= 0:
-        return True    # extreme ask AND no bid — no real market
-    if ask > bid * _MAX_SPREAD_RATIO:
-        return True    # wide spread → dust ask, not a real price
-    return False
+    # Strict mirror: run bid_looks_orphan on the (1-price) complement side.
+    # When bid<=0 we also want to delegate — let bid_looks_orphan decide
+    # based on its own zero-bid rule applied to the complement.
+    comp_bid = 1.0 - ask
+    comp_ask = (1.0 - bid) if bid > 0 else 0.0
+    comp_entry = 1.0 - signal_price
+    return bid_looks_orphan(comp_bid, comp_ask, comp_entry)
 
 
 # ── 1. Stop-loss monitor ──────────────────────────────────────────────────────

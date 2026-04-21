@@ -123,9 +123,21 @@ class TestAskLooksOrphan:
         """ask 0.99 and no bid at all — clearly no market."""
         assert ask_looks_orphan(bid=0.0, ask=0.99, signal_price=0.50) is True
 
-    def test_longshot_signal_no_guard(self):
-        """Signal < 0.10 is a longshot — wide ask is normal, don't guard."""
-        assert ask_looks_orphan(bid=0.01, ask=0.99, signal_price=0.08) is False
+    def test_longshot_signal_with_dead_book_is_orphan(self):
+        """T-56: longshot signal (0.08) with dead book (bid=0.01 ask=0.99)
+        is STILL orphan. Previous version exempted signal<0.10 unconditionally,
+        but bid=0.01/ask=0.99 is a dead book at any signal level — there's
+        no real counterparty near fair value. The strict-complement mirror
+        of bid_looks_orphan correctly fires here because the complement
+        values (entry=0.92, bid=0.01, ask=0.99) land in the anti-longshot
+        regime and the dust-bid-wide-spread rule triggers."""
+        assert ask_looks_orphan(bid=0.01, ask=0.99, signal_price=0.08) is True
+
+    def test_longshot_signal_with_tight_book_not_orphan(self):
+        """Longshot signal (0.05) with a TIGHT real book (bid=0.03 ask=0.07)
+        must NOT be flagged — the complement (entry=0.95, bid=0.93, ask=0.97)
+        shows bid well within range of entry → not orphan."""
+        assert ask_looks_orphan(bid=0.03, ask=0.07, signal_price=0.05) is False
 
     def test_degenerate_ask_zero(self):
         """ask=0 means no ask on book — handled by an upstream check, not ours."""

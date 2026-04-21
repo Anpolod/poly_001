@@ -42,6 +42,7 @@ import argparse
 import asyncio
 import logging
 import os
+import random
 import sys
 from dataclasses import dataclass
 from datetime import timedelta
@@ -367,29 +368,45 @@ def _print_summary(trades: list[ReplayTrade], skipped: dict, position_size_usd: 
     roi = total_pnl / total_invested if total_invested > 0 else 0
     avg_hold = sum(t.hours_held for t in trades) / n
 
-    # Wilson score 95% CI for win rate — straightforward test of whether the
-    # observed edge is statistically distinguishable from 50% coinflip.
-    # Required to decide whether the signal is worth re-enabling.
+    # Wilson score 95% CI for win rate — descriptive only. 50% is NOT the
+    # profitability threshold because break-even win rate equals the average
+    # entry price per trade; at entry=0.30 a 40% win rate is profitable, at
+    # entry=0.60 even 55% loses money. We report this purely as context.
     z = 1.96
     denom = 1 + z * z / n
     center = (win_rate + z * z / (2 * n)) / denom
     margin = z * ((win_rate * (1 - win_rate) + z * z / (4 * n)) / n) ** 0.5 / denom
-    ci_lo, ci_hi = max(0.0, center - margin), min(1.0, center + margin)
+    wr_ci_lo, wr_ci_hi = max(0.0, center - margin), min(1.0, center + margin)
+
+    # T-56: bootstrap 95% CI on mean pnl_pct (per-share P&L). This IS the
+    # authoritative EV test — mean P&L distinguishable from zero is the
+    # correct gate for re-enabling a strategy. Seeded RNG for reproducibility.
+    pnl_samples = [t.pnl_pct for t in trades]
+    mean_pnl_pct = sum(pnl_samples) / n
+    rng = random.Random(42)
+    bootstrap_means = sorted(
+        sum(rng.choice(pnl_samples) for _ in range(n)) / n
+        for _ in range(1000)
+    )
+    pnl_ci_lo = bootstrap_means[24]   # 2.5th percentile of 1000
+    pnl_ci_hi = bootstrap_means[974]  # 97.5th percentile of 1000
 
     print(f"  win rate           : {win_rate:.1%} ({wins}/{n})")
-    print(f"  95% CI             : [{ci_lo:.1%}, {ci_hi:.1%}]")
+    print(f"  win rate 95% CI    : [{wr_ci_lo:.1%}, {wr_ci_hi:.1%}]  (descriptive)")
+    print(f"  avg pnl / share    : {mean_pnl_pct:+.4f}")
+    print(f"  pnl/share 95% CI   : [{pnl_ci_lo:+.4f}, {pnl_ci_hi:+.4f}]  (bootstrap)")
     print(f"  avg hold           : {avg_hold:.1f}h")
     print(f"  avg pnl / trade    : ${avg_pnl:+.2f}")
     print(f"  total pnl          : ${total_pnl:+.2f}")
     print(f"  total invested     : ${total_invested:.2f}")
     print(f"  ROI                : {roi:+.1%}")
 
-    if ci_lo > 0.5:
-        print(f"  verdict            : ✅ significant positive edge (CI lower > 50%)")
-    elif ci_hi < 0.5:
-        print(f"  verdict            : ❌ significant negative edge (CI upper < 50%)")
+    if pnl_ci_lo > 0:
+        print(f"  verdict            : ✅ significant positive edge (pnl CI lower > 0)")
+    elif pnl_ci_hi < 0:
+        print(f"  verdict            : ❌ significant negative edge (pnl CI upper < 0)")
     else:
-        print(f"  verdict            : ⚠️  inconclusive — CI straddles 50% (need more data)")
+        print(f"  verdict            : ⚠️  inconclusive — pnl CI straddles 0 (need more data)")
 
     # Breakdown by strength
     by_strength: dict[str, list[ReplayTrade]] = {}

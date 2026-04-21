@@ -806,14 +806,25 @@ async def log_signals_to_db(pool: asyncpg.Pool, signals: list[TankingSignal]) ->
     inserted = 0
     async with pool.acquire() as conn:
         for s in signals:
+            # T-56: dedupe on (market_id, pattern_strength, action). Previously
+            # we dedup'd on market_id alone, which meant the first WATCH row in
+            # a 6-hour window would suppress a later HIGH+BUY transition on the
+            # same market — defeating T-55's backtest purpose (paper_trade_signals
+            # would undercount actionable signals). Now we persist a new row on
+            # every state change; identical-state rescans within the same 6h
+            # window are still collapsed.
             existing = await conn.fetchval(
                 """
                 SELECT id FROM tanking_signals
                 WHERE market_id = $1
+                  AND pattern_strength = $2
+                  AND action = $3
                   AND scanned_at > NOW() - INTERVAL '6 hours'
                 LIMIT 1
                 """,
                 s.market_id,
+                s.pattern_strength,
+                s.recommended_action,
             )
             if existing:
                 continue

@@ -261,6 +261,40 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-56 · Adversarial-review fixes (4 findings from Codex) ✅
+**Status:** DONE — 2026-04-21
+**Источник:** `/codex:adversarial-review` пост-T-52/T-53/T-54/T-55. Verdict `needs-attention`, 1 HIGH + 3 MED.
+**Время:** ~40 мин
+
+**Fix 1 [HIGH] — dry_run BUY fail-closed** ([trading/clob_executor.py:119-149](trading/clob_executor.py#L119))
+Previous `try/except: pass` silently swallowed `get_market_info` failures, then the `if live_ask > 0` guard was skipped (live_ask=0.0) and dry_run fake-filled at requested price. Это именно degraded-dependency path, который T-52 должен был защитить. Fix: на exception → return `status="rejected"`. Также reject'им `live_ask <= 0` (empty book) — невозможно верифицировать reachability ни в одном варианте. Нет phantom fills когда CLOB flaky.
+
+**Fix 2 [MED] — tanking dedupe allows state transitions** ([analytics/tanking_scanner.py:802-831](analytics/tanking_scanner.py#L802))
+Было: `WHERE market_id=$1 AND scanned_at > NOW()-'6 hours'`. Если первый scan'ал рынок как WATCH, затем в пределах 6h появляется HIGH+BUY signal — он suppressed, T-55's backtest undercount'ит actionable signals. Fix: `WHERE market_id=$1 AND pattern_strength=$2 AND action=$3 AND scanned_at > NOW()-'6 hours'`. Identical-state rescans всё ещё collapsed (no DB bloat), state transitions создают новую row.
+
+**Fix 3 [MED] — profitability verdict на bootstrap CI not Wilson-vs-50%** ([analytics/paper_trade_signals.py:370-405](analytics/paper_trade_signals.py#L370))
+Win rate 50% не universal break-even — break-even равен average entry_price per trade. Entry=0.30 → 40% win rate profitable; entry=0.60 → 55% loses money. Fix: Wilson CI остаётся как descriptive win-rate output (теперь с label "descriptive"), verdict переведён на bootstrap 95% CI среднего `pnl_pct` (per-share P&L). 1000 bootstrap resamples со seeded RNG (42) для reproducibility. Verdict: `ci_lo > 0` → positive edge; `ci_hi < 0` → negative edge; else inconclusive.
+
+**Fix 4 [MED] — `ask_looks_orphan` via strict complement** ([trading/risk_guard.py:94-117](trading/risk_guard.py#L94))
+Code claim'ил "mirror of bid_looks_orphan on (1-price) complement" но реализовано было вручную с асимметричным `signal_price < 0.10` exemption (longshot-only). Fix: delegation через `bid_looks_orphan(1-ask, 1-bid, 1-signal_price)`. Теперь симметрия mechanical. Для signal>0.90 dead book → guard НЕ fire'ит (reviewer's concern что legit favorite entries не должны hard-skip'иться). Для signal<0.10 dead book → guard **теперь fire'ит** (dead book это dead book at any signal level). Комплементная делегация убирает edge-cases и делает math verifiable.
+
+**Тесты:**
+- Updated: `test_longshot_signal_no_guard` → `test_longshot_signal_with_dead_book_is_orphan` (inverted assertion под новую семантику)
+- Added: `test_longshot_signal_with_tight_book_not_orphan` (regression guard: tight real longshot book must NOT fire)
+- Previous TestAskLooksOrphan 8 существующих тестов — все продолжают проходить после complement-delegation
+- Full suite: 256/256 pass (+1 new test, same 255 as before)
+
+**Что НЕ покрыто и отложено:**
+- Bootstrap CI использует simple resampling; для очень небольших N (< 10) could use BCa (bias-corrected accelerated) но overkill для текущего use case. Note'нуто в code comment.
+- Tanking dedupe на (market_id, strength, action) — не на (market_id, strength, action, current_price_bucket). Price drift без strength change одну строку в 6h даст. Acceptable trade-off per T-55 goal (strategy action states, not price snapshots).
+- dry_run BUY теперь делает HTTP call (`get_market_info`) на каждый fake fill. Latency +50-100ms per signal, но это dry_run path — budget есть. В prod этот branch не исполняется.
+
+**Verification:**
+- 256/256 tests pass
+- Ran `paper_trade_signals --signal-type pitcher --exit-model resolution` на same данных — bootstrap CI на pnl/share даёт [-0.545, -0.375] (vs old Wilson CI на win rate [0%, 43.4%]). Verdict остаётся "❌ significant negative edge" — T-53 conclusion не меняется.
+
+---
+
 ### T-55 · Persist tanking signals → enable future backtest ✅
 **Status:** DONE — 2026-04-21
 **Источник:** T-54 post-mortem обнаружил что `tanking_signals` таблица **пустая** (0 rows) несмотря на то что tanking scanner работает в bot_main с 2026-04-14. Следствие — strategy вообще не может быть backtested через `paper_trade_signals --signal-type tanking` (хотя инфра уже есть).
