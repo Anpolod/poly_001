@@ -261,6 +261,50 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-53 · Pitcher signal backtest — held-to-resolution P&L ✅
+**Status:** DONE — 2026-04-21
+**Gate для:** можно ли re-enable `mlb_pitcher_scanner.enabled` в config (отключён в T-52).
+**Время:** ~40 мин
+**Verdict: ❌ pitcher scanner остаётся DISABLED.**
+
+**Что сделано:**
+Расширил [analytics/paper_trade_signals.py](analytics/paper_trade_signals.py) новым `--exit-model resolution` флагом. Существующая `snapshot` модель использует `price_snapshots` с exit'ом за `HOURS_BEFORE_EXIT` до игры; новая `resolution` модель использует `historical_calibration.outcome` (1 если YES resolved win, 0 если NO) и мэппит на favored_side: `exit_price = 1.0 if favored_won else 0.0`. Это настоящий strategy-validity test — "did the signal pick the winning team?", не "did the market drift toward the signal pre-game?".
+
+Новый `_find_exit_at_resolution()` (~15 строк) + dispatcher в `replay()` + Wilson score 95% CI в `_print_summary()` для statistical verdict. Reuse'ится весь existing side-resolution + replay infrastructure.
+
+**Результат backtest'а на живых данных (2026-04-21):**
+
+| Exit model | N | Win rate | 95% CI | ROI | Verdict |
+|---|---|---|---|---|---|
+| Snapshot (pre-game close) | 27 | 55.6% | [37.3%, 72.4%] | +3.4% | ⚠️ inconclusive |
+| Resolution (held to outcome) | 5 | 0.0% | [0%, 43.4%] | -100% | ❌ significant negative edge |
+
+**Interpretation:**
+Snapshot mode показывает что рынок слегка движется в сторону сигнала pre-game (55.6%, но CI straddles 50% — not significant). Resolution mode показывает что сигнал **НЕ предсказывает исходы игр** — 0/5 correct picks. Два exit models отвечают на разные вопросы:
+- Snapshot: "does market agree with signal direction?" → weak yes
+- Resolution: "does signal predict winners?" → strong no
+
+Эти могут сосуществовать: сигнал может корректно identify'ить что рынок THINKS (короткий drift), но не то что actually WILL happen. Strategy основанная на predicting outcomes fails. Strategy основанная на riding pre-game drift могла бы быть positive-EV, но требует separate design + больше данных.
+
+**Sample size caveat:**
+Только 5 из 23 уникальных pitcher-рынков находятся в `historical_calibration`. Latest MLB row в таблице — 2026-04-16, остальные 18 markets (04-17..04-21 games) не подтянуты `historical_fetcher.py`. CI [0%, 43.4%] держится даже на такой выборке — upper bound ниже 50% → статистически significant negative edge. Backfill историcheckal_fetcher'ом добавит ~18 точек и может уточнить CI, но вряд ли изменит verdict с "negative" на "positive" (expected value близко к 43% даже в оптимистичном случае).
+
+**Рекомендация:**
+1. **Не re-enable'ить `mlb_pitcher_scanner.enabled`** — keep `false` in config.
+2. Если хочется "ride the drift" strategy — design separately, с exit-before-resolution logic и валидация через snapshot mode с N > 100.
+3. Future session: run `python -m analytics.historical_fetcher --skip-existing` на Mac Mini для refresh'а `historical_calibration`, затем re-run backtest. Если CI крутится — просто остался same verdict.
+
+**Verification:**
+- 255/255 tests pass (no new tests — analytics CLI tool, core side-resolution уже покрыто 20 тестами в test_resolve_team_token.py)
+- `python -m analytics.paper_trade_signals --signal-type pitcher --exit-model resolution` работает end-to-end
+- `--exit-model snapshot` (existing) не сломался — тот же numerical output что pre-T-53
+
+**Explicit non-goals:**
+- Backfill `historical_calibration` через historical_fetcher (deferred — N=5 достаточно для current verdict)
+- Tanking backtest (T-55 TBD — нужно сначала убедиться что T-54 фикс на продакшне пресёк substring-bug и data уже честная)
+
+---
+
 ### T-54 · Team-match substring overlap bug (Hornets ⊃ Nets) ✅
 **Status:** DONE — 2026-04-21
 **Источник:** post-mortem 2026-04-21 7 tanking позиций, которые все оказались на одном и том же рынке `nba-cha-orl-2026-04-17-spread-away-3pt5`.

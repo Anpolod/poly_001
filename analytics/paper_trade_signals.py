@@ -1,30 +1,39 @@
 """Historical signal-to-P&L replay.
 
 Takes rows from a signals table (pitcher_signals / tanking_signals / ...),
-simulates what a paper-trade position would have returned using price_snapshots
-as the source of truth. This is a quick sanity check, NOT a full backtest:
+simulates what a paper-trade position would have returned. Two exit models:
 
-  - Entry: signal.current_price at scan time (scanner already side-corrects
-    for NO-side favorites, so this is the actual contract price the bot
-    would have bought).
-  - Exit: mid_price snapshot closest to `game_start - HOURS_BEFORE_EXIT` hours,
-    inverted to (1 - mid) if the favored team is on NO side. Matches the bot's
-    auto-exit-before-game behaviour.
-  - Stop-loss / take-profit: NOT simulated here; the bot also uses 40% SL/TP
-    which would change some losing trades into smaller losses. Results below
-    are therefore a *ceiling* on what the strategy could have produced under
-    ideal exit timing.
+  - `snapshot` (default) — exits at the last price_snapshot before
+    `game_start - HOURS_BEFORE_EXIT` hours, inverted for NO-side favorites.
+    Answers: "did the market move toward our bet pre-game?"
+
+  - `resolution` (T-53) — exits at the resolved outcome via
+    historical_calibration (won → 1.0 on favored side, lost → 0.0).
+    Answers: "did the signal pick the winning team?" This is the true
+    strategy-validity test. Required to gate `mlb_pitcher_scanner.enabled`.
+
+Entry is the same for both models: signal.current_price at scan time
+(scanner already side-corrects for NO-side favorites).
+
+Stop-loss / take-profit: NOT simulated here; the bot also uses 40% SL/TP
+which would change some losing trades into smaller losses. Snapshot-mode
+results are therefore a *ceiling* on what the strategy could have produced
+under ideal exit timing. Resolution-mode results are a *floor* in the
+opposite direction — a real bot would exit pre-game at the snapshot price,
+not hold to resolution — but the win/loss direction is authoritative.
 
 The side-resolution step (`resolve_team_token_side`) is the same helper the
 live scanner uses post-T-41, so the paper result matches what the bot would
 have traded today — it does NOT reproduce what a pre-T-41 bot would have done.
 
 Usage:
+    # Snapshot exit (existing behavior)
     python -m analytics.paper_trade_signals \\
-        --signal-type pitcher \\
-        --strength HIGH \\
-        --position-size 10 \\
-        --output /tmp/pitcher_replay.csv
+        --signal-type pitcher --strength HIGH --output /tmp/pitcher_replay.csv
+
+    # Resolution exit — strategy validity check (T-53)
+    python -m analytics.paper_trade_signals \\
+        --signal-type pitcher --strength HIGH --exit-model resolution
 """
 
 from __future__ import annotations
@@ -180,6 +189,31 @@ async def _find_exit_snapshot(
     return float(mid), row["ts"]
 
 
+async def _find_exit_at_resolution(
+    conn: asyncpg.Connection,
+    market_id: str,
+    side: str,
+    game_start,
+) -> Optional[tuple[float, object]]:
+    """T-53: return (exit_price_on_favored_side, game_start) from resolved outcome.
+
+    Looks up historical_calibration.outcome (0 or 1) and maps to the favored
+    side's contract value: 1.0 if favored won, 0.0 if favored lost. The
+    "exit timestamp" is game_start since resolution happens at game end —
+    good enough for hours_held purposes.
+    """
+    row = await conn.fetchrow(
+        "SELECT outcome FROM historical_calibration WHERE market_id = $1",
+        market_id,
+    )
+    if row is None or row["outcome"] is None:
+        return None
+    outcome = int(row["outcome"])
+    favored_won = (outcome == 1 and side == "YES") or (outcome == 0 and side == "NO")
+    exit_price = 1.0 if favored_won else 0.0
+    return exit_price, game_start
+
+
 async def replay(
     conn: asyncpg.Connection,
     signal_type: str,
@@ -187,8 +221,12 @@ async def replay(
     action: Optional[str],
     position_size_usd: float,
     hours_before_exit: float,
+    exit_model: str = "snapshot",
 ) -> tuple[list[ReplayTrade], dict]:
-    """Return (trades, skipped_counts)."""
+    """Return (trades, skipped_counts).
+
+    exit_model: "snapshot" (pre-game mid) | "resolution" (T-53: outcome=1|0).
+    """
     cfg = SIGNAL_CONFIG[signal_type]
 
     # Lazy-imported to avoid loading trading/ at module import time
@@ -196,13 +234,14 @@ async def replay(
     aliases = _load_callable(cfg["aliases_loader"])()
 
     rows = await _fetch_signals(conn, cfg, strength, action)
-    logger.info("fetched %d %s signals (strength=%s, action=%s)",
-                len(rows), signal_type, strength, action)
+    logger.info("fetched %d %s signals (strength=%s, action=%s, exit=%s)",
+                len(rows), signal_type, strength, action, exit_model)
 
     trades: list[ReplayTrade] = []
     skipped = {
         "no_side": 0,
-        "no_exit_snapshot": 0,
+        "no_exit_snapshot": 0,       # used by snapshot model
+        "no_resolution": 0,          # used by resolution model (T-53)
         "game_not_passed": 0,
         "zero_or_negative_entry": 0,
     }
@@ -229,16 +268,24 @@ async def replay(
             skipped["no_side"] += 1
             continue
 
-        exit_info = await _find_exit_snapshot(
-            conn, r["market_id"], r["scanned_at"],
-            r["game_start"], hours_before_exit,
-        )
-        if exit_info is None:
-            skipped["no_exit_snapshot"] += 1
-            continue
-
-        mid, exit_ts = exit_info
-        exit_price = mid if side == "YES" else (1.0 - mid)
+        if exit_model == "resolution":
+            exit_info = await _find_exit_at_resolution(
+                conn, r["market_id"], side, r["game_start"],
+            )
+            if exit_info is None:
+                skipped["no_resolution"] += 1
+                continue
+            exit_price, exit_ts = exit_info
+        else:
+            exit_info = await _find_exit_snapshot(
+                conn, r["market_id"], r["scanned_at"],
+                r["game_start"], hours_before_exit,
+            )
+            if exit_info is None:
+                skipped["no_exit_snapshot"] += 1
+                continue
+            mid, exit_ts = exit_info
+            exit_price = mid if side == "YES" else (1.0 - mid)
 
         pnl_pct = exit_price - entry
         shares = position_size_usd / entry
@@ -320,12 +367,29 @@ def _print_summary(trades: list[ReplayTrade], skipped: dict, position_size_usd: 
     roi = total_pnl / total_invested if total_invested > 0 else 0
     avg_hold = sum(t.hours_held for t in trades) / n
 
+    # Wilson score 95% CI for win rate — straightforward test of whether the
+    # observed edge is statistically distinguishable from 50% coinflip.
+    # Required to decide whether the signal is worth re-enabling.
+    z = 1.96
+    denom = 1 + z * z / n
+    center = (win_rate + z * z / (2 * n)) / denom
+    margin = z * ((win_rate * (1 - win_rate) + z * z / (4 * n)) / n) ** 0.5 / denom
+    ci_lo, ci_hi = max(0.0, center - margin), min(1.0, center + margin)
+
     print(f"  win rate           : {win_rate:.1%} ({wins}/{n})")
+    print(f"  95% CI             : [{ci_lo:.1%}, {ci_hi:.1%}]")
     print(f"  avg hold           : {avg_hold:.1f}h")
     print(f"  avg pnl / trade    : ${avg_pnl:+.2f}")
     print(f"  total pnl          : ${total_pnl:+.2f}")
     print(f"  total invested     : ${total_invested:.2f}")
     print(f"  ROI                : {roi:+.1%}")
+
+    if ci_lo > 0.5:
+        print(f"  verdict            : ✅ significant positive edge (CI lower > 50%)")
+    elif ci_hi < 0.5:
+        print(f"  verdict            : ❌ significant negative edge (CI upper < 50%)")
+    else:
+        print(f"  verdict            : ⚠️  inconclusive — CI straddles 50% (need more data)")
 
     # Breakdown by strength
     by_strength: dict[str, list[ReplayTrade]] = {}
@@ -369,6 +433,10 @@ async def main() -> int:
                         help="hypothetical USD per trade (default: 10)")
     parser.add_argument("--hours-before-exit", type=float, default=0.5,
                         help="exit this many hours before game_start (default: 0.5)")
+    parser.add_argument("--exit-model", choices=["snapshot", "resolution"],
+                        default="snapshot",
+                        help="snapshot: pre-game close mid (default). "
+                             "resolution: held-to-resolution outcome (T-53).")
     parser.add_argument("--output", type=str,
                         help="CSV output path (optional)")
     parser.add_argument("--config", type=str,
@@ -389,6 +457,7 @@ async def main() -> int:
             action=args.action,
             position_size_usd=args.position_size,
             hours_before_exit=args.hours_before_exit,
+            exit_model=args.exit_model,
         )
     finally:
         await conn.close()
