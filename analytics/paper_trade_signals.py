@@ -223,10 +223,15 @@ async def replay(
     position_size_usd: float,
     hours_before_exit: float,
     exit_model: str = "snapshot",
+    spread_cost_per_share: float = 0.0,
 ) -> tuple[list[ReplayTrade], dict]:
     """Return (trades, skipped_counts).
 
     exit_model: "snapshot" (pre-game mid) | "resolution" (T-53: outcome=1|0).
+    spread_cost_per_share: deducted from each pnl_pct to simulate realistic
+      execution (entry at ask, exit at bid). Pass 0.02 for typical Polymarket
+      books (~1¢ spread per side). Gross-mode backtest pretends we trade at
+      mid on both sides, which overstates edge by the full spread.
     """
     cfg = SIGNAL_CONFIG[signal_type]
 
@@ -288,7 +293,11 @@ async def replay(
             mid, exit_ts = exit_info
             exit_price = mid if side == "YES" else (1.0 - mid)
 
-        pnl_pct = exit_price - entry
+        # T-57: gross pnl is mid-to-mid (or entry-to-resolution). Subtract a
+        # realistic round-trip spread cost per share to approximate live
+        # execution (buy at ask, sell at bid). Caller passes 0 to keep the
+        # old gross-mode output.
+        pnl_pct = exit_price - entry - spread_cost_per_share
         shares = position_size_usd / entry
         pnl_usd = pnl_pct * shares
 
@@ -454,6 +463,12 @@ async def main() -> int:
                         default="snapshot",
                         help="snapshot: pre-game close mid (default). "
                              "resolution: held-to-resolution outcome (T-53).")
+    parser.add_argument("--spread-cost", type=float, default=0.0,
+                        help="Deduct this per-share cost to simulate live "
+                             "execution (buy-at-ask, sell-at-bid). "
+                             "Typical Polymarket pitcher/tanking markets "
+                             "run ~1¢ spread per side → try 0.02. "
+                             "Default 0 = gross mid-to-mid.")
     parser.add_argument("--output", type=str,
                         help="CSV output path (optional)")
     parser.add_argument("--config", type=str,
@@ -475,6 +490,7 @@ async def main() -> int:
             position_size_usd=args.position_size,
             hours_before_exit=args.hours_before_exit,
             exit_model=args.exit_model,
+            spread_cost_per_share=args.spread_cost,
         )
     finally:
         await conn.close()

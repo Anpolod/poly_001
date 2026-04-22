@@ -261,6 +261,43 @@ NBA markets обычно YES-side, но bug latent — при любом NO-side
 
 ---
 
+### T-57 · Drift-capture pitcher variant — NO-BUILD after cost reality check ✅
+**Status:** DONE — 2026-04-22 (decision: do not build)
+**Источник:** T-53 показал что pitcher ERA-diff сигнал предсказывает short-term drift (55.6% win rate pre-game) но НЕ outcomes (0/5 resolution). Гипотеза: "ride the drift" стратегия (enter → exit до игры) может быть profitable даже если full-hold fails. Протестировали в 2 шага: спредовый reality check + decision.
+**Время:** ~25 мин (вместо запланированных 90 мин, потому что rejected на first cost pass).
+
+**Infrastructure shipped:**
+Расширил [analytics/paper_trade_signals.py](analytics/paper_trade_signals.py) новым `--spread-cost` flag. Deduct'ит per-share spread cost из pnl_pct для каждой trade'ы. Default 0 (gross mid-to-mid как в T-53). Typical Polymarket books running 1¢/side → pass `--spread-cost 0.02` для round-trip realism. Это универсальная инфра для ЛЮБОЙ future strategy evaluation: если edge не survive'ет realistic costs, no-build decision делается до implementation, не после.
+
+**Cost data (measured for existing 32 pitcher_signals markets):**
+- Avg entry spread: 1.03¢
+- Avg exit spread (T-0.5h): 1.00¢
+- Round-trip realistic: ~2¢ per share
+
+**Cost sensitivity analysis (exact same N=32 sample):**
+
+| spread_cost | ROI | pnl/share 95% CI | Verdict |
+|---|---|---|---|
+| 0.00 (gross mid-to-mid) | +3.5% | [+0.002, +0.033] | ✅ significant positive |
+| 0.01 (optimistic tight-book) | +1.5% | [-0.008, +0.023] | ⚠️ inconclusive |
+| 0.02 (realistic) | **-0.5%** | [-0.018, +0.013] | ⚠️ inconclusive, mean negative |
+
+**Decision: NO-BUILD.**
+Drift-capture strategy's gross observed edge (1.7¢ per share) is exactly the typical round-trip spread cost. At realistic 2¢ round-trip, CI center is negative and crosses zero by a hair. At optimistic 1¢ (tight-book-only markets), CI still crosses zero. Implementing would be trading on noise. Expected absolute profit even at optimistic cost: ~$0.15/trade × 4 trades/day × $100 budget = pennies; not worth operational complexity and regression risk.
+
+**Что НЕ reject'нуто:**
+- If future data shows narrower spreads on specific sub-segment (e.g., only MLB markets with ask_depth > $200), edge might re-emerge. `--spread-cost` flag позволяет rapid re-test. Sample N=32 currently too small для such slicing.
+- Infrastructure value: any future signal evaluation now runs through same cost-aware backtest. Prevents "T-53 bug" (gross-mode verdict that doesn't survive reality).
+
+**Verification:**
+- 256/256 tests pass (no new tests — flag is straight per-trade deduction, trivial math)
+- Three backtest runs above confirm cost sensitivity; gross edge disappears under realistic costs
+
+**Follow-up:**
+- T-58+: if NBA regular season restarts OR MLB signals аккумулируются further, re-run cost-sensitivity analysis. Until then, no pitcher-drift work.
+
+---
+
 ### T-56 · Adversarial-review fixes (4 findings from Codex) ✅
 **Status:** DONE — 2026-04-21
 **Источник:** `/codex:adversarial-review` пост-T-52/T-53/T-54/T-55. Verdict `needs-attention`, 1 HIGH + 3 MED.
