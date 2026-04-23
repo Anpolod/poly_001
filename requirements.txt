@@ -24,6 +24,15 @@ idna==3.11
 multidict==6.7.1
 numpy==2.4.4
 pandas==3.0.2
+# pandas 3.x .style accessor requires jinja2 + markupsafe as optional-runtime deps.
+# Pinned explicitly because streamlit pulls them transitively but pandas's internal
+# check (pandas.compat._optional.import_optional_dependency) sometimes fails to
+# resolve them when venv is created with --system-site-packages — then dashboard's
+# trading.py DataFrame.style.map crashes at render time. Keep these two listed so
+# a pure `python -m venv venv && venv/bin/pip install -r requirements.txt` flow
+# ships the working combo without manual --force-reinstall.
+jinja2>=3.1
+markupsafe>=3.0
 propcache==0.4.1
 python-dateutil==2.9.0.post0
 six==1.17.0
