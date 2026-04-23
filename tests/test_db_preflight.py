@@ -201,11 +201,19 @@ class _FakeConn:
 
 
 def _run_main(conn: _FakeConn, check_only: bool = False) -> int:
-    """Invoke db_preflight.main() with asyncpg.connect patched to return conn."""
+    """Invoke db_preflight.main() with asyncpg.connect + config loading patched.
+
+    `_load_db_config` reads `config/settings.yaml`, which is gitignored and
+    absent from CI checkouts. Return a dummy dict so tests stay hermetic.
+    """
     async def fake_connect(**_kwargs):
         return conn
 
-    with patch.object(db_preflight.asyncpg, "connect", new=fake_connect):
+    dummy_cfg = {"host": "localhost", "port": 5432,
+                 "name": "test", "user": "test", "password": "test"}
+
+    with patch.object(db_preflight.asyncpg, "connect", new=fake_connect), \
+         patch.object(db_preflight, "_load_db_config", return_value=dummy_cfg):
         return asyncio.run(db_preflight.main(check_only=check_only))
 
 
