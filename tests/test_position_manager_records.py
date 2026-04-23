@@ -198,6 +198,7 @@ def test_dry_run_exit_closes_position_immediately() -> None:
     running in dry-run mode. This test would have caught the bug.
     """
     from unittest.mock import patch
+
     from trading.order_poller import _handle_exit_pending
 
     # Simulate a position that had a dry-run SELL placed against it
@@ -241,6 +242,7 @@ def test_dry_run_buy_auto_fills_on_first_poll() -> None:
     must be called with 'filled'.
     """
     from unittest.mock import patch
+
     from trading import order_poller
 
     pending_dry = {
@@ -290,6 +292,7 @@ def test_dry_run_buy_does_not_re_fill_already_filled() -> None:
     _set_fill_status('filled', filled) is idempotent but extra DB writes
     per tick × many positions × many ticks is wasteful."""
     from unittest.mock import patch
+
     from trading import order_poller
 
     already_filled_dry = {
@@ -299,7 +302,8 @@ def test_dry_run_buy_does_not_re_fill_already_filled() -> None:
         "token_id": "t", "entry_price": 0.5, "size_usd": 5.0,
         "game_start": None,
     }
-    pool = AsyncMock(); pool.execute = AsyncMock()
+    pool = AsyncMock()
+    pool.execute = AsyncMock()
     executor = AsyncMock()
 
     call_count = {"n": 0}
@@ -330,6 +334,7 @@ def test_dry_run_exit_reverts_if_no_usable_price() -> None:
     we must not close at $0 (that would book an outsized fake loss). Revert
     to filled instead so the next tick can retry."""
     from unittest.mock import patch
+
     from trading.order_poller import _handle_exit_pending
 
     pos = {
@@ -535,6 +540,7 @@ def _make_pitcher_signal(favored_side: str, current_price: float):
     """Build a minimal PitcherSignal. Scanner writes `current_price` already
     side-corrected (i.e. 1 - yes_mid for NO favorites) since T-41."""
     from datetime import datetime, timezone
+
     from analytics.mlb_pitcher_scanner import PitcherSignal
 
     return PitcherSignal(
@@ -567,7 +573,8 @@ def test_process_pitcher_signal_uses_signal_price_for_no_side_directly() -> None
     the wrong series. We pin it by asserting the exact price handed to buy()
     and the `side` argument of the confirmation message.
     """
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import AsyncMock, patch
+
     from trading import bot_main
 
     signal = _make_pitcher_signal(favored_side="NO", current_price=0.47)
@@ -660,6 +667,7 @@ def _make_tanking_signal(motivated_side: str, current_price: float):
     """Build a minimal TankingSignal. Scanner writes `current_price` already
     side-corrected (i.e. 1 - yes_mid for NO-side motivated teams) since T-36."""
     from datetime import datetime, timezone
+
     from analytics.tanking_scanner import TankingSignal
 
     return TankingSignal(
@@ -688,7 +696,8 @@ def test_process_tanking_signal_uses_signal_price_for_no_side_directly() -> None
     Mirrors the T-42 test for MLB. Pin the exact price handed to buy() and
     the `side` argument of the confirmation message to catch any regression.
     """
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import AsyncMock, patch
+
     from trading import bot_main
 
     signal = _make_tanking_signal(motivated_side="NO", current_price=0.72)
@@ -775,7 +784,8 @@ def test_process_tanking_signal_uses_signal_price_for_no_side_directly() -> None
 def test_process_tanking_signal_aborts_on_side_mismatch() -> None:
     """T-36 defensive: if scanner-time side disagrees with live-resolve side,
     refuse to trade rather than pick one. Mirror of the MLB mismatch test."""
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import AsyncMock, patch
+
     from trading import bot_main
 
     signal = _make_tanking_signal(motivated_side="YES", current_price=0.60)
@@ -801,7 +811,8 @@ def test_process_pitcher_signal_aborts_on_side_mismatch() -> None:
     resolve returns 'NO' (token id remapped mid-flight, stale cache, etc.),
     we must refuse to trade rather than pick one and hope. The function
     returns 0.0 exposure and executor.buy is never called."""
-    from unittest.mock import patch, AsyncMock
+    from unittest.mock import AsyncMock, patch
+
     from trading import bot_main
 
     signal = _make_pitcher_signal(favored_side="YES", current_price=0.40)

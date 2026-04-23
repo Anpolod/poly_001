@@ -26,9 +26,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import asyncpg
+import yaml
 
 from collector.network import make_session
-import yaml
 
 # ── project root on sys.path ──────────────────────────────────────────────────
 _ROOT = Path(__file__).resolve().parent.parent
@@ -43,46 +43,59 @@ if _ENV_FILE.exists():
             k, v = line.split("=", 1)
             os.environ.setdefault(k.strip(), v.strip())
 
-from analytics.prop_scanner import PropOpportunity, scan as prop_scan  # noqa: E402
-from analytics.tanking_scanner import (  # noqa: E402
-    TankingSignal,
-    enrich_with_lineup_news,
-    get_standings,
-    load_aliases,
-    log_signals_to_db as persist_tanking_signals,
-    scan_tanking_patterns,
-)
-from analytics.injury_scanner import (  # noqa: E402
-    InjurySignal,
-    build_injury_signals,
-    persist_signals as persist_injury_signals,
-)
 from analytics.calibration_signal import (  # noqa: E402
     CalibrationSignal,
+)
+from analytics.calibration_signal import (
     scan as calibration_scan,
 )
 from analytics.drift_monitor import (  # noqa: E402
     DriftSignal,
+)
+from analytics.drift_monitor import (
     persist_signals as persist_drift_signals,
+)
+from analytics.drift_monitor import (
     scan as drift_scan,
 )
-from analytics.spike_signal import (  # noqa: E402
-    SpikeSignal,
-    persist_signals as persist_spike_signals,
-    scan as spike_scan,
+from analytics.injury_scanner import (  # noqa: E402
+    InjurySignal,
+    build_injury_signals,
+)
+from analytics.injury_scanner import (
+    persist_signals as persist_injury_signals,
 )
 from analytics.mlb_pitcher_scanner import (  # noqa: E402
     PitcherSignal,
     load_mlb_aliases,
     scan_pitcher_patterns,
 )
+from analytics.prop_scanner import PropOpportunity  # noqa: E402
+from analytics.prop_scanner import scan as prop_scan
+from analytics.spike_signal import (  # noqa: E402
+    SpikeSignal,
+)
+from analytics.spike_signal import (
+    persist_signals as persist_spike_signals,
+)
+from analytics.spike_signal import (
+    scan as spike_scan,
+)
+from analytics.tanking_scanner import (  # noqa: E402
+    TankingSignal,
+    enrich_with_lineup_news,
+    get_standings,
+    load_aliases,
+    scan_tanking_patterns,
+)
+from analytics.tanking_scanner import (
+    log_signals_to_db as persist_tanking_signals,
+)
 from collector.mlb_data import MLBDataFetcher  # noqa: E402
 from trading.clob_executor import ClobExecutor  # noqa: E402
 from trading.entry_filter import check_entry  # noqa: E402
 from trading.exit_monitor import check_and_exit, check_stagnation_exit  # noqa: E402
 from trading.order_poller import poll_order_fills  # noqa: E402
-from trading.risk_guard import circuit_breaker_check, correlation_check, stop_loss_monitor  # noqa: E402
-from trading.telegram_commands import daily_digest, handle_commands, heartbeat  # noqa: E402
 from trading.position_manager import (  # noqa: E402
     get_total_exposure,
     has_position,
@@ -90,7 +103,9 @@ from trading.position_manager import (  # noqa: E402
     open_position,
     resolve_team_token_side,
 )
+from trading.risk_guard import circuit_breaker_check, correlation_check, stop_loss_monitor  # noqa: E402
 from trading.risk_manager import can_open, position_size_by_ev, tanking_roi_estimate  # noqa: E402
+from trading.telegram_commands import daily_digest, handle_commands, heartbeat  # noqa: E402
 from trading.telegram_confirm import (  # noqa: E402
     send_error_alert,
     send_order_confirmation,
@@ -349,7 +364,8 @@ async def _process_tanking_signal(
     market_line = f"Market: {entry_emoji} {entry_reason}\n"
     extra = (
         f"{market_line}"
-        f"Side: {motivated_side}  |  Game in {signal.hours_to_game:.1f}h  |  diff={signal.motivation_differential:.1f}\n"
+        f"Side: {motivated_side}  |  Game in {signal.hours_to_game:.1f}h  |  "
+        f"diff={signal.motivation_differential:.1f}\n"
         f"{drift_str}"
         f"vs {signal.tanking_team}"
     )
@@ -574,7 +590,10 @@ async def _process_pitcher_signal(
         entry_price=trade_price,
         game_start=signal.game_start,
         clob_order_id=order_id_str,
-        notes=f"favored={signal.favored_team}({favored_side}) SP={signal.home_pitcher_name}vs{signal.away_pitcher_name}",
+        notes=(
+            f"favored={signal.favored_team}({favored_side}) "
+            f"SP={signal.home_pitcher_name}vs{signal.away_pitcher_name}"
+        ),
         side=favored_side,   # T-38: persist real side (YES or NO) instead of hardcoded YES
     )
     await log_order(pool, signal.market_id, position_id, "buy", order)

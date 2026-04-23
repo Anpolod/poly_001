@@ -33,7 +33,9 @@ jobs:
         run: ruff check .
 
       - name: Type check (mypy)
-        run: mypy . --exclude venv
+        # Relies on exclude list in pyproject.toml (venv, dashboard/, injury_scanner).
+        # Passing --exclude on the CLI would override the config list, not merge.
+        run: mypy .
 
       - name: Test (pytest)
         run: pytest -v

@@ -25,7 +25,6 @@ import streamlit as st
 
 from dashboard import charts, db
 
-
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 _STATE_FILE = _root / "logs" / "bot_state.json"

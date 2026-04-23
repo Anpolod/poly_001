@@ -105,7 +105,7 @@ class ClobExecutor:
         ask = _price(asks[0]) if asks else 0.0
 
         # Sum ask-side depth (shares × price) across top levels up to 10 levels
-        ask_depth_usd = sum(_price(l) * _size(l) for l in asks[:10])
+        ask_depth_usd = sum(_price(level) * _size(level) for level in asks[:10])
 
         return {"bid": bid, "ask": ask, "ask_depth_usd": ask_depth_usd}
 

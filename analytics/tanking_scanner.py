@@ -134,11 +134,11 @@ def load_standings_from_fallback() -> list[TeamStanding]:
     try:
         with open(_FALLBACK_STANDINGS_PATH) as f:
             data = yaml.safe_load(f)
-    except FileNotFoundError:
+    except FileNotFoundError as err:
         raise FileNotFoundError(
             f"Fallback standings missing: {_FALLBACK_STANDINGS_PATH}. "
             "Create it or ensure ESPN API is reachable."
-        )
+        ) from err
 
     standings: list[TeamStanding] = []
     for conf_key, conf_short in (("east", "East"), ("west", "West")):
@@ -551,7 +551,8 @@ async def scan_tanking_patterns(
         ))
 
     # Sort: HIGH first, then by differential descending
-    signals.sort(key=lambda s: (-{"HIGH": 2, "MODERATE": 1, "WATCH": 0}[s.pattern_strength], -s.motivation_differential))
+    _strength_rank = {"HIGH": 2, "MODERATE": 1, "WATCH": 0}
+    signals.sort(key=lambda s: (-_strength_rank[s.pattern_strength], -s.motivation_differential))
     return signals
 
 
@@ -654,10 +655,14 @@ async def run_backtest(pool: asyncpg.Pool) -> None:
             event_start,
         )
 
-        def price_at_offset(hours_before: float) -> Optional[float]:
-            target = event_start - timedelta(hours=hours_before)
+        def price_at_offset(
+            hours_before: float,
+            _event_start=event_start,
+            _price_rows=price_rows,
+        ) -> Optional[float]:
+            target = _event_start - timedelta(hours=hours_before)
             candidates = [
-                r for r in price_rows
+                r for r in _price_rows
                 if abs((r["ts"] - target).total_seconds()) < 3600
             ]
             if not candidates:
@@ -714,9 +719,19 @@ async def run_backtest(pool: asyncpg.Pool) -> None:
             return sum(1 for v in vals if v > 0) / len(vals) * 100 if vals else 0.0
 
         print(f"\n  {label} — {len(subset)} markets")
-        print(f"    T-24h → close: median drift {median(drifts_24):+.4f}  |  {pct_positive(drifts_24):.0f}% positive  |  max {max(drifts_24, default=0):+.4f}  min {min(drifts_24, default=0):+.4f}")
-        print(f"    T-12h → close: median drift {median(drifts_12):+.4f}  |  {pct_positive(drifts_12):.0f}% positive")
-        print(f"    T-6h  → close: median drift {median(drifts_6):+.4f}  |  {pct_positive(drifts_6):.0f}% positive")
+        print(
+            f"    T-24h → close: median drift {median(drifts_24):+.4f}  |  "
+            f"{pct_positive(drifts_24):.0f}% positive  |  "
+            f"max {max(drifts_24, default=0):+.4f}  min {min(drifts_24, default=0):+.4f}"
+        )
+        print(
+            f"    T-12h → close: median drift {median(drifts_12):+.4f}  |  "
+            f"{pct_positive(drifts_12):.0f}% positive"
+        )
+        print(
+            f"    T-6h  → close: median drift {median(drifts_6):+.4f}  |  "
+            f"{pct_positive(drifts_6):.0f}% positive"
+        )
 
     print(f"\n  Total markets analyzed: {len(results)}\n")
 

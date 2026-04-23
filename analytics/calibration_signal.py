@@ -170,7 +170,7 @@ async def build_edges(
         n = len(items)
         if n < _CONF_LOW:
             continue
-        hi = next(h for l, h, _ in _BUCKETS if l == lo)
+        hi = next(h for low, h, _ in _BUCKETS if low == lo)
         avg_price = sum(p for p, _ in items) / n
         actual_win_rate = sum(o for _, o in items) / n
         edge_pct = (actual_win_rate - avg_price) * 100

@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import logging
 import sys
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -207,7 +206,6 @@ async def scan_pitcher_patterns(
     For each ESPN game with a significant pitcher mismatch, find the
     corresponding Polymarket market and generate a signal.
     """
-    from collector.mlb_data import MLBGame  # noqa: PLC0415
 
     markets = await find_upcoming_mlb_markets(pool, hours)
     if not markets:

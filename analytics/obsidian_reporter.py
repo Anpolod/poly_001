@@ -212,7 +212,12 @@ async def report_calibration(pool: asyncpg.Pool) -> Path:
     lines += ["", "## By Price Bucket", ""]
 
     for mtype in sorted({r["market_type"] for r in bucket_rows}):
-        lines += [f"### {mtype.title()}", "", "| Bucket | N | Avg price | Actual win | Edge (pp) |", "|--------|---|-----------|------------|-----------|"]
+        lines += [
+            f"### {mtype.title()}",
+            "",
+            "| Bucket | N | Avg price | Actual win | Edge (pp) |",
+            "|--------|---|-----------|------------|-----------|",
+        ]
         for r in bucket_rows:
             if r["market_type"] != mtype:
                 continue
@@ -520,7 +525,7 @@ async def report_trading_summary(pool: asyncpg.Pool) -> Path:
         "",
         "## All-Time Stats",
         "",
-        f"| Metric | Value |",
+        "| Metric | Value |",
         "|--------|-------|",
         f"| Total trades | {total} |",
         f"| Closed | {closed} |",
@@ -560,7 +565,7 @@ async def report_trading_summary(pool: asyncpg.Pool) -> Path:
             f"| ${float(r['pnl'] or 0):+.2f} |"
         )
 
-    lines += ["", "---", f"*Run `make obsidian-trading` to refresh.*", ""]
+    lines += ["", "---", "*Run `make obsidian-trading` to refresh.*", ""]
     out_file.write_text("\n".join(lines), encoding="utf-8")
     return out_file
 

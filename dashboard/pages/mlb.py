@@ -18,7 +18,7 @@ if str(_root) not in sys.path:
 import pandas as pd
 import streamlit as st
 
-from dashboard import db, charts
+from dashboard import charts, db
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 

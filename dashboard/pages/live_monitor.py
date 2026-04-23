@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
@@ -22,7 +23,6 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard import db
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -221,7 +221,11 @@ def render() -> None:
             df_snap["ts"] = pd.to_datetime(df_snap["ts"]).dt.strftime("%H:%M:%S")
             df_snap["mid_price"] = pd.to_numeric(df_snap["mid_price"], errors="coerce").round(4)
             df_snap["spread"] = pd.to_numeric(df_snap["spread"], errors="coerce").round(4)
-            df_snap["question_short"] = df_snap["question"].str[:50] if "question" in df_snap.columns else df_snap["market_id"]
+            df_snap["question_short"] = (
+                df_snap["question"].str[:50]
+                if "question" in df_snap.columns
+                else df_snap["market_id"]
+            )
             show = df_snap[["ts", "sport", "question_short", "mid_price", "spread"]].rename(
                 columns={"ts": "Time", "sport": "Sport", "question_short": "Market",
                          "mid_price": "Price", "spread": "Spread"}

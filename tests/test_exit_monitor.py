@@ -116,8 +116,8 @@ from trading.exit_monitor import check_and_exit
 def test_auto_exit_uses_entry_price_fallback_on_orphan_bid() -> None:
     """Position at game time, orderbook still thin → close at entry_price
     not dust bid. Records wash trade (pnl near 0) instead of phantom -95%."""
-    from unittest.mock import patch, AsyncMock
     from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock, patch
 
     now = datetime.now(tz=timezone.utc)
     pool = AsyncMock()
@@ -164,8 +164,8 @@ def test_auto_exit_uses_entry_price_fallback_on_orphan_bid() -> None:
 
 def test_auto_exit_uses_live_bid_when_quote_is_healthy() -> None:
     """Real market with tight spread → close at live bid as normal."""
-    from unittest.mock import patch, AsyncMock
     from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock, patch
 
     now = datetime.now(tz=timezone.utc)
     pos = {

@@ -23,7 +23,6 @@ from trading.risk_guard import (
     correlation_check,
 )
 
-
 # ── T-48: bid_looks_orphan sanity guard ──────────────────────────────────────
 #
 # Observed real cases on paper-trading Mac Mini:

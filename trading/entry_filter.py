@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from trading.risk_guard import ask_looks_orphan
 
-
 _MAX_SPREAD = 0.20          # cents between bid and ask
 _MAX_ASK_RATIO = 1.15       # ask must be ≤ signal_price × this
 _MAX_DEAD_ASK = 0.95        # ask ≥ this → no real sellers

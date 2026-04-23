@@ -25,7 +25,7 @@ import asyncio
 import logging
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -286,13 +286,15 @@ def _print_report(records: list[MarketRecord], price_window: str) -> None:
         "12h": "price_pre12h",
     }.get(price_window, "price_close")
 
-    total = len(df)
     with_price = df[price_col].notna().sum()
     resolved = df["outcome"].notna().sum()
 
     print(f"\n{'='*90}")
-    print(f"  PRE-GAME CALIBRATION ANALYSIS")
-    print(f"  Price window: {price_window} before event_start  |  {resolved} markets with outcomes  |  {with_price} with price data")
+    print("  PRE-GAME CALIBRATION ANALYSIS")
+    print(
+        f"  Price window: {price_window} before event_start  |  "
+        f"{resolved} markets with outcomes  |  {with_price} with price data"
+    )
     print(f"{'='*90}")
 
     # --- Overall calibration ---
@@ -459,7 +461,7 @@ async def run(
         resolutions = await _fetch_all_resolutions(market_ids, base_url)
 
         # Build records
-        records: list[MarketRecord] = []
+        records = []
         for m in markets:
             res = resolutions.get(m["id"])
             if res is None:

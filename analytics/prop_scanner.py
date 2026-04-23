@@ -22,7 +22,6 @@ import asyncio
 import json
 import logging
 import sys
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -342,7 +341,7 @@ def _print_opportunities(opps: list[PropOpportunity], price_window: str) -> None
 
     print(f"\n{'='*110}")
     print(f"  PLAYER PROP SCANNER  —  {now_str}")
-    print(f"  Model: historical calibration on 10,800 NBA prop markets (Feb–Apr 2026)")
+    print("  Model: historical calibration on 10,800 NBA prop markets (Feb–Apr 2026)")
     print(f"{'='*110}")
 
     if not opps:
@@ -387,7 +386,7 @@ def _print_opportunities(opps: list[PropOpportunity], price_window: str) -> None
 
     print()
     print("  ✓ = spread ≤ 4¢ (reasonable to fill)  |  EV/unit = expected profit per $1 at YES price")
-    print(f"  Model win rate = historical actual win rate adjusted for current price bucket")
+    print("  Model win rate = historical actual win rate adjusted for current price bucket")
     print(f"{'='*110}\n")
 
 

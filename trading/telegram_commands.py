@@ -29,7 +29,6 @@ import aiohttp
 import asyncpg
 
 from collector.network import make_session
-
 from trading.clob_executor import ClobExecutor
 from trading.position_manager import get_open_positions, mark_position_cancelled
 
@@ -314,7 +313,11 @@ async def _build_digest(
 
     positions = await get_open_positions(pool)
     filled = [p for p in positions if (p.get("fill_status") or "") == "filled"]
-    pending = [p for p in positions if (p.get("fill_status") or "pending") not in ("filled", "cancelled", "force_cancelled", "timed_out")]
+    pending = [
+        p for p in positions
+        if (p.get("fill_status") or "pending")
+           not in ("filled", "cancelled", "force_cancelled", "timed_out")
+    ]
 
     pnl_today = await pool.fetchrow(
         """

@@ -28,7 +28,7 @@ import asyncio
 import logging
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -52,6 +52,11 @@ class Snapshot:
     spread: float
     bid_depth: float
     ask_depth: float
+    # entry_price is patched on the snapshot instance when we use it as the
+    # entry anchor in a backtest loop — keeps the simulator's state minimal
+    # without adding a separate Position dataclass. Optional to avoid
+    # breaking constructors that don't set it.
+    entry_price: Optional[float] = None
 
 
 @dataclass
@@ -201,7 +206,6 @@ def run_drift_signal(
     trades: list[Trade] = []
     n = len(snapshots)
     in_position = False
-    entry_idx = 0
     entry_snap: Optional[Snapshot] = None
     direction = ""
     lookback_sec = lookback_min * 60
@@ -213,8 +217,11 @@ def run_drift_signal(
 
         if in_position and entry_snap is not None:
             elapsed = (snap.ts - entry_snap.ts).total_seconds()
-            price_move = snap.mid_price - entry_snap.entry_price if direction == "buy" \
-                else entry_snap.entry_price - snap.mid_price  # type: ignore[attr-defined]
+            price_move = (
+                snap.mid_price - entry_snap.entry_price
+                if direction == "buy"
+                else entry_snap.entry_price - snap.mid_price
+            )
             pnl_raw = price_move
 
             exit_reason = None
@@ -226,16 +233,16 @@ def run_drift_signal(
                 exit_reason = "eod"
 
             if exit_reason:
-                cost_frac = taker_rt_cost_pct / 100.0 * entry_snap.entry_price  # type: ignore[attr-defined]
+                cost_frac = taker_rt_cost_pct / 100.0 * entry_snap.entry_price
                 pnl_net = pnl_raw - cost_frac
                 hold_minutes = elapsed / 60.0
                 trades.append(Trade(
                     market_id=snap.market_id,
                     signal="drift",
                     direction=direction,
-                    entry_ts=entry_snap.ts,  # type: ignore[attr-defined]
+                    entry_ts=entry_snap.ts,
                     exit_ts=snap.ts,
-                    entry_price=entry_snap.entry_price,  # type: ignore[attr-defined]
+                    entry_price=entry_snap.entry_price,
                     exit_price=snap.mid_price,
                     taker_rt_cost_pct=taker_rt_cost_pct,
                     pnl_raw=round(pnl_raw, 4),
@@ -265,9 +272,8 @@ def run_drift_signal(
 
         direction = "buy" if move > 0 else "sell"
         in_position = True
-        entry_snap = snap  # type: ignore[assignment]
-        entry_snap.entry_price = snap.mid_price  # type: ignore[attr-defined]
-
+        entry_snap = snap
+        entry_snap.entry_price = snap.mid_price
     return trades
 
 
@@ -285,7 +291,6 @@ def run_reversion_signal(
     Enter at first snapshot after spike end_ts.
     """
     trades: list[Trade] = []
-    snap_by_ts = {s.ts: s for s in snapshots}
     snap_list = sorted(snapshots, key=lambda x: x.ts)
 
     for spike in spikes:

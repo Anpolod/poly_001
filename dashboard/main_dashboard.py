@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 _root = Path(__file__).parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
@@ -29,7 +30,18 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from dashboard.pages import cost_analysis, health, live_monitor, markets, mlb, movements, overview, signals, tanking, trading
+from dashboard.pages import (
+    cost_analysis,
+    health,
+    live_monitor,
+    markets,
+    mlb,
+    movements,
+    overview,
+    signals,
+    tanking,
+    trading,
+)
 
 # ── Page registry ─────────────────────────────────────────────────────────────
 PAGES: dict[str, tuple[str, object]] = {

@@ -45,7 +45,7 @@ import os
 import random
 import sys
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -92,8 +92,8 @@ SIGNAL_CONFIG = {
 @dataclass
 class ReplayTrade:
     signal_id: int
-    scanned_at: object
-    game_start: object
+    scanned_at: datetime
+    game_start: datetime
     market_id: str
     slug: Optional[str]
     team: str
@@ -102,7 +102,7 @@ class ReplayTrade:
     action: str
     entry_price: float
     exit_price: float
-    exit_ts: object
+    exit_ts: datetime
     hours_held: float
     pnl_pct: float         # exit - entry, signed
     pnl_usd: float         # pnl_pct * shares; shares = position_size / entry
@@ -157,7 +157,7 @@ async def _find_exit_snapshot(
     scanned_at,
     game_start,
     hours_before_exit: float,
-) -> Optional[tuple[float, object]]:
+) -> Optional[tuple[float, datetime]]:
     """Return (mid_price, ts) of the snapshot the bot would have exited on.
 
     Rules:
@@ -195,7 +195,7 @@ async def _find_exit_at_resolution(
     market_id: str,
     side: str,
     game_start,
-) -> Optional[tuple[float, object]]:
+) -> Optional[tuple[float, datetime]]:
     """T-53: return (exit_price_on_favored_side, game_start) from resolved outcome.
 
     Looks up historical_calibration.outcome (0 or 1) and maps to the favored
@@ -411,11 +411,11 @@ def _print_summary(trades: list[ReplayTrade], skipped: dict, position_size_usd: 
     print(f"  ROI                : {roi:+.1%}")
 
     if pnl_ci_lo > 0:
-        print(f"  verdict            : ✅ significant positive edge (pnl CI lower > 0)")
+        print("  verdict            : ✅ significant positive edge (pnl CI lower > 0)")
     elif pnl_ci_hi < 0:
-        print(f"  verdict            : ❌ significant negative edge (pnl CI upper < 0)")
+        print("  verdict            : ❌ significant negative edge (pnl CI upper < 0)")
     else:
-        print(f"  verdict            : ⚠️  inconclusive — pnl CI straddles 0 (need more data)")
+        print("  verdict            : ⚠️  inconclusive — pnl CI straddles 0 (need more data)")
 
     # Breakdown by strength
     by_strength: dict[str, list[ReplayTrade]] = {}

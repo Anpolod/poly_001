@@ -22,6 +22,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Config
@@ -133,9 +134,9 @@ def autodetect_projects() -> dict:
     print(f"  Project root:        {project_root}", file=sys.stderr)
     print(f"  Computed slug:       {exact_slug}", file=sys.stderr)
     print(f"  Looked up under:     {CLAUDE_PROJECTS_DIR}", file=sys.stderr)
-    print(f"  Hint: open this project in Claude Code at least once so it",
+    print("  Hint: open this project in Claude Code at least once so it",
           file=sys.stderr)
-    print(f"        creates ~/.claude/projects/<slug>/, OR set",
+    print("        creates ~/.claude/projects/<slug>/, OR set",
           file=sys.stderr)
     print(f"        ECOSYSTEM_PROJECTS = {{...}} explicitly in {Path(__file__).name}",
           file=sys.stderr)
@@ -354,7 +355,7 @@ def process_project(
     args: argparse.Namespace,
 ) -> dict:
     """Process all JSONL files for one ecosystem project."""
-    stats = {"written": 0, "skipped_existing": 0, "days": 0, "latest_ts": ""}
+    stats: dict[str, Any] = {"written": 0, "skipped_existing": 0, "days": 0, "latest_ts": ""}
     if not project_dir.exists():
         print(f"  ({project_label}) project dir not found, skipping.")
         return stats
@@ -448,7 +449,7 @@ def main():
         projects = autodetect_projects()
         detection_mode = "auto-detect"
 
-    print(f"compile_kb.py — preprocessor")
+    print("compile_kb.py — preprocessor")
     print(f"  Claude projects dir: {CLAUDE_PROJECTS_DIR}")
     print(f"  Output dir:          {RAW_DIR}")
     print(f"  Mode:                {'DRY RUN' if args.dry_run else 'LIVE'}{' (rebuild all)' if args.all else ''}")

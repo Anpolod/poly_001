@@ -103,8 +103,10 @@ async def check_and_exit(
 
             # Obsidian trade diary (fire-and-forget, non-critical)
             try:
-                import yaml
                 from pathlib import Path as _Path
+
+                import yaml
+
                 from analytics.obsidian_reporter import log_closed_trade
                 _cfg = yaml.safe_load((_Path(__file__).parent.parent / "config" / "settings.yaml").read_text())
                 await log_closed_trade(_cfg, position_id)

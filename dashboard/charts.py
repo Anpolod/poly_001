@@ -7,9 +7,9 @@ a Plotly figure object ready to pass to st.plotly_chart().
 
 from __future__ import annotations
 
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import pandas as pd
 
 
 def price_history_chart(rows: list[dict], market_label: str = "") -> go.Figure:

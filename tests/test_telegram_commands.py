@@ -15,14 +15,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 # ── Helpers imported directly (no I/O) ───────────────────────────────────────
-
 from trading.telegram_commands import (
     _MAX_MSG,
     _cmd_pnl,
     _cmd_week,
     _send_long,
 )
-
 
 # ── _send_long: message splitting ────────────────────────────────────────────
 

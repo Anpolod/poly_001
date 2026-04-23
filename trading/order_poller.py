@@ -394,11 +394,17 @@ async def _handle_exit_pending(
         # For now, use the cached current_bid as a best-effort exit price.
         exit_price = float(pos.get("current_bid") or pos.get("entry_price") or 0)
         if exit_price <= 0:
-            logger.warning("Position %d (%s): MATCHED exit but no fill price available, using entry as fallback", position_id, slug)
+            logger.warning(
+                "Position %d (%s): MATCHED exit but no fill price available, using entry as fallback",
+                position_id, slug,
+            )
             exit_price = float(pos["entry_price"] or 0)
 
         pnl = await close_position(pool, position_id, exit_price)
-        logger.info("Position %d (%s): exit MATCHED  shares=%.4f  pnl=$%+.2f", position_id, slug, size_matched, pnl)
+        logger.info(
+            "Position %d (%s): exit MATCHED  shares=%.4f  pnl=$%+.2f",
+            position_id, slug, size_matched, pnl,
+        )
 
         try:
             from trading.telegram_confirm import _post  # noqa: PLC0415
@@ -415,7 +421,10 @@ async def _handle_exit_pending(
             logger.info("Telegram exit notification failed (non-critical)")
 
     elif clob_status in ("CANCELLED", "UNMATCHED"):
-        logger.warning("Position %d (%s): exit SELL %s — reverting to filled, will retry", position_id, slug, clob_status)
+        logger.warning(
+            "Position %d (%s): exit SELL %s — reverting to filled, will retry",
+            position_id, slug, clob_status,
+        )
         await mark_exit_failed(pool, position_id)
 
         try:

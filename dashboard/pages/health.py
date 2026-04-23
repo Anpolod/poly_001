@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
 _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
@@ -18,7 +19,7 @@ from datetime import datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from dashboard import db, charts
+from dashboard import charts, db
 
 
 def _heartbeat_age(last_ts) -> tuple[str, str]:
