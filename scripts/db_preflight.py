@@ -50,11 +50,14 @@ REQUIRED_TABLES = (
     "pitcher_signals",
     "injury_signals",
     "calibration_edges",
-    "order_log",       # T-43: audit log of CLOB buys/sells; was mis-named `orders`
-    "drift_signals",   # T-44: drift_monitor persists via persist_drift_signals
-    "spike_signals",   # T-44: spike_signal persists via persist_spike_signals
-    "prop_scan_log",   # T-44: prop_scanner --daemon / --watch writes here
-    "tanking_signals", # T-44: tanking_scanner --save writes here
+    "order_log",        # T-43: audit log of CLOB buys/sells; was mis-named `orders`
+    "drift_signals",    # T-44: drift_monitor persists via persist_drift_signals
+    "spike_signals",    # T-44: spike_signal persists via persist_spike_signals
+    "prop_scan_log",    # T-44: prop_scanner --daemon / --watch writes here
+    "tanking_signals",  # T-44: tanking_scanner --save writes here
+    "maker_quotes",     # T-58: LP rewards MM agent — GTC quote lifecycle
+    "maker_fills",      # T-58: fills against our maker quotes
+    "rewards_history",  # T-58: weekly reward earnings snapshots + claim tracking
 )
 
 # T-43: table-presence alone is not enough — `CREATE TABLE IF NOT EXISTS` will

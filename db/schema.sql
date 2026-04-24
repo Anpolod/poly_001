@@ -297,6 +297,69 @@ CREATE INDEX IF NOT EXISTS idx_pitcher_signals_market
 CREATE INDEX IF NOT EXISTS idx_pitcher_signals_game_start
     ON pitcher_signals (game_start);
 
+-- T-58: LP Rewards market-maker tables. Kept SEPARATE from open_positions
+-- because directional and MM P&L lifecycles differ: MM places/cancels
+-- many short-lived quotes per hour, directional tracks a single position
+-- per signal. Sharing the table would make both harder to reason about.
+
+-- Every BUY/SELL limit order placed by the MM agent. A "paired quote"
+-- is two rows (one BUY, one SELL) linked by placed_at proximity on the
+-- same market_id. Rows are immutable: placement creates a row, and
+-- cancel/fill stamps cancelled_at + status WITHOUT deleting.
+CREATE TABLE IF NOT EXISTS maker_quotes (
+    id            SERIAL PRIMARY KEY,
+    market_id     TEXT NOT NULL,
+    slug          TEXT,
+    side          TEXT NOT NULL,                -- BUY | SELL
+    token_id      TEXT NOT NULL,
+    price         NUMERIC(8,4) NOT NULL,
+    size_shares   NUMERIC(12,4) NOT NULL,
+    clob_order_id TEXT,                         -- assigned after successful CLOB POST
+    placed_at     TIMESTAMPTZ DEFAULT NOW(),
+    cancelled_at  TIMESTAMPTZ,
+    status        TEXT DEFAULT 'LIVE'           -- LIVE | MATCHED | CANCELLED | EXPIRED | REJECTED
+);
+CREATE INDEX IF NOT EXISTS idx_maker_quotes_market
+    ON maker_quotes (market_id, placed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_maker_quotes_status
+    ON maker_quotes (status) WHERE status = 'LIVE';
+
+-- Fills detected via order_poller / WebSocket. Each fill refers to the
+-- parent quote row. A single quote can have multiple partial fills; we
+-- accumulate fill_size until quote is MATCHED.
+CREATE TABLE IF NOT EXISTS maker_fills (
+    id             SERIAL PRIMARY KEY,
+    quote_id       INTEGER REFERENCES maker_quotes(id),
+    market_id      TEXT NOT NULL,
+    side           TEXT NOT NULL,
+    fill_price     NUMERIC(8,4) NOT NULL,
+    fill_size      NUMERIC(12,4) NOT NULL,
+    ts             TIMESTAMPTZ DEFAULT NOW(),
+    clob_trade_id  TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_maker_fills_market
+    ON maker_fills (market_id, ts DESC);
+CREATE INDEX IF NOT EXISTS idx_maker_fills_quote
+    ON maker_fills (quote_id);
+
+-- Weekly reward emissions. Polymarket accrues rewards per market per day;
+-- we snapshot totals from /rewards/user endpoint into this table so we can
+-- track earnings trajectory, reconcile expected vs actual, and mark claimed
+-- status after each on-chain claim transaction.
+CREATE TABLE IF NOT EXISTS rewards_history (
+    id             SERIAL PRIMARY KEY,
+    snapshot_ts    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    week_start     DATE NOT NULL,                -- Monday of the week this covers
+    market_id      TEXT,                         -- NULL for aggregate totals
+    rewards_usdc   NUMERIC(10,4) NOT NULL,
+    claimed        BOOLEAN DEFAULT FALSE,
+    claimed_at     TIMESTAMPTZ,
+    claim_tx_hash  TEXT,
+    raw_json       JSONB                         -- exact API response for audit
+);
+CREATE INDEX IF NOT EXISTS idx_rewards_history_week
+    ON rewards_history (week_start, market_id);
+
 -- Historical market outcomes + pre-game prices (populated by historical_fetcher.py)
 -- Used by calibration_analyzer + calibration_signal --build
 CREATE TABLE IF NOT EXISTS historical_calibration (
